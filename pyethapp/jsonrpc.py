@@ -717,12 +717,6 @@ class Compilers(Subdispatcher):
         if self.compilers_ is None:
             self.compilers_ = {}
             try:
-                import serpent
-                self.compilers_['serpent'] = serpent.compile
-                self.compilers_['lll'] = serpent.compile_lll
-            except ImportError:
-                pass
-            try:
                 import ethereum.tools._solidity
                 s = ethereum.tools._solidity.get_solidity()
                 if s:
@@ -741,22 +735,6 @@ class Compilers(Subdispatcher):
     def compileSolidity(self, code):
         try:
             return self.compilers['solidity'](code)
-        except KeyError:
-            raise MethodNotFoundError()
-
-    @public
-    @encode_res(data_encoder)
-    def compileSerpent(self, code):
-        try:
-            return self.compilers['serpent'](code)
-        except KeyError:
-            raise MethodNotFoundError()
-
-    @public
-    @encode_res(data_encoder)
-    def compileLLL(self, code):
-        try:
-            return self.compilers['lll'](code)
         except KeyError:
             raise MethodNotFoundError()
 

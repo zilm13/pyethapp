@@ -12,7 +12,6 @@ import gc
 
 import pytest
 import rlp
-import serpent
 import ethereum
 import ethereum.config
 import ethereum.tools.keys
@@ -580,12 +579,11 @@ def test_send_transaction(test_app):
 
 
 def test_send_transaction_with_contract(test_app):
-    serpent_code = '''
-def main(a,b):
-    return(a ^ b)
-'''
     tx_to = b''
-    evm_code = serpent.compile(serpent_code)
+    # Serpent code:
+    # def main(a,b):
+    #     return(a ^ b)
+    evm_code = b'a\x00K\x80a\x00\x0e`\x009a\x00YV|\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00`\x005\x04c\x97\xd8W\xaa\x81\x14\x15a\x00IW`\x045`@R`$5``R``Q`@Q\n`\x80R` `\x80\xf3[P[`\x00\xf3'
     chainservice = test_app.services.chain
     chain = test_app.services.chain.chain
     state = State(chainservice.head_candidate.state_root, chain.env)
@@ -616,12 +614,11 @@ def main(a,b):
 
 
 def test_send_raw_transaction_with_contract(test_app):
-    serpent_code = '''
-def main(a,b):
-    return(a ^ b)
-'''
     tx_to = b''
-    evm_code = serpent.compile(serpent_code)
+    # Serpent code:
+    # def main(a,b):
+    #     return(a ^ b)
+    evm_code = b'a\x00K\x80a\x00\x0e`\x009a\x00YV|\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00`\x005\x04c\x97\xd8W\xaa\x81\x14\x15a\x00IW`\x045`@R`$5``R``Q`@Q\n`\x80R` `\x80\xf3[P[`\x00\xf3'
     chainservice = test_app.services.chain
     chain = test_app.services.chain.chain
     state = State(chainservice.head_candidate.state_root, chain.env)

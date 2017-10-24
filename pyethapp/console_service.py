@@ -240,13 +240,7 @@ class Console(BaseService):
             solc_wrapper = None
             pass
 
-        try:
-            import serpent
-        except ImportError:
-            serpent = None
-            pass
-
-        self.console_locals = dict(eth=Eth(self.app), solidity=solc_wrapper, serpent=serpent,
+        self.console_locals = dict(eth=Eth(self.app), solidity=solc_wrapper,
                                    denoms=denoms, true=True, false=False, Eth=Eth)
 
         for k, v in list(self.app.script_globals.items()):
