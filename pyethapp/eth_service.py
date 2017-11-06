@@ -22,8 +22,9 @@ from devp2p.service import WiredService
 
 from ethereum.block import Block
 from ethereum.meta import make_head_candidate
-from ethereum.pow.chain import Chain
-from ethereum.pow.consensus import initialize, check_pow
+from ethereum.hybrid_casper import casper_utils
+from ethereum.hybrid_casper.chain import Chain
+from ethereum.hybrid_casper.consensus import initialize, check_pow
 from ethereum.config import Env
 from ethereum.genesis_helpers import mk_genesis_data
 from ethereum import config as ethereum_config
@@ -36,6 +37,7 @@ from ethereum.exceptions import InvalidTransaction, InvalidNonce, \
 from ethereum.transactions import Transaction
 from ethereum.utils import (
     encode_hex,
+    decode_hex,
     to_string,
 )
 
@@ -164,14 +166,20 @@ class ChainService(WiredService):
         super(ChainService, self).__init__(app)
         log.info('initializing chain')
         coinbase = app.services.accounts.coinbase
-        env = Env(self.db, sce['block'])
+        # env = Env(self.db, sce['block'])
 
-        genesis_data = sce.get('genesis_data', {})
-        if not genesis_data:
-            genesis_data = mk_genesis_data(env)
-        self.chain = Chain(
-            env=env, genesis=genesis_data, coinbase=coinbase,
-            new_head_cb=self._on_new_head)
+        # genesis_data = sce.get('genesis_data', {})
+        # if not genesis_data:
+        #     genesis_data = mk_genesis_data(env)
+        # self.chain = Chain(
+        #     env=env, genesis=genesis_data, coinbase=coinbase,
+        #     new_head_cb=self._on_new_head)
+        accounts = [coinbase]
+        ALLOC = {a: {'balance': 500*10**19} for a in accounts}
+        # TODO: Remove this dumb default alloc
+        ALLOC[decode_hex('7d577a597b2742b498cb5cf0c26cdcd726d39e6e')] = {'balance': 500*10**19}
+        genesis_data = casper_utils.make_casper_genesis(ALLOC, 5, 100, 0.02, 0.002)
+        self.chain = Chain(genesis=genesis_data, reset_genesis=True, coinbase=coinbase, new_head_cb=self._on_new_head)
         header = self.chain.state.prev_headers[0]
         log.info('chain at', number=header.number)
         if 'genesis_hash' in sce:
@@ -190,7 +198,8 @@ class ChainService(WiredService):
         self._head_candidate_needs_updating = True
         # Initialize a new head candidate.
         _ = self.head_candidate
-        self.min_gasprice = 20 * 10**9 # TODO: better be an option to validator service?
+        self.min_gasprice = 0 # TODO: Change this to actually make sense
+        # self.min_gasprice = 20 * 10**9 # TODO: better be an option to validator service?
         self.add_blocks_lock = False
         self.add_transaction_lock = gevent.lock.Semaphore()
         self.broadcast_filter = DuplicatesFilter()
@@ -206,8 +215,8 @@ class ChainService(WiredService):
     def is_mining(self):
         if 'pow' in self.app.services:
             return self.app.services.pow.active
-        if 'validator' in self.app.services:
-            return self.app.services.validator.active
+        # if 'validator' in self.app.services:
+        #     return self.app.services.validator.validating
         return False
 
     def process_time_queue(self):
@@ -274,6 +283,7 @@ class ChainService(WiredService):
             log.debug('invalid tx', error=e)
             return
 
+        log.info('is mining?', mining=self.is_mining)
         if origin is not None:  # not locally added via jsonrpc
             if not self.is_mining or self.is_syncing:
                 log.debug('discarding tx', syncing=self.is_syncing, mining=self.is_mining)
@@ -305,7 +315,7 @@ class ChainService(WiredService):
             assert block == self.chain.head
             self.transaction_queue = self.transaction_queue.diff(block.transactions)
             self._head_candidate_needs_updating = True
-            self.broadcast_newblock(block, chain_difficulty=self.chain.get_score(block))
+            self.broadcast_newblock(block, chain_difficulty=self.chain.get_pow_difficulty(block))
             return True
         log.debug('failed to add', block=block, ts=time.time())
         return False
@@ -395,7 +405,7 @@ class ChainService(WiredService):
     def broadcast_newblock(self, block, chain_difficulty=None, origin=None):
         if not chain_difficulty:
             assert self.chain.has_blockhash(block.hash)
-            chain_difficulty = self.chain.get_score(block)
+            chain_difficulty = self.chain.get_pow_difficulty(block)
         assert isinstance(block, (eth_protocol.TransientBlock, Block))
         if self.broadcast_filter.update(block.header.hash):
             log.debug('broadcasting newblock', origin=origin)
@@ -491,7 +501,7 @@ class ChainService(WiredService):
 
         # send status
         head = self.chain.head
-        proto.send_status(chain_difficulty=self.chain.get_score(head), chain_head_hash=head.hash,
+        proto.send_status(chain_difficulty=self.chain.get_pow_difficulty(head), chain_head_hash=head.hash,
                           genesis_hash=self.chain.genesis.hash)
 
     def on_wire_protocol_stop(self, proto):

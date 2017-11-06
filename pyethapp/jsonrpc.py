@@ -213,7 +213,7 @@ class RPCServer(BaseService):
             if block is None:
                 raise KeyError("Block with id %s does not exist" % block_id)
 
-        block.score = chain.get_score(block)
+        block.score = chain.get_pow_difficulty(block)
         return block
 
 

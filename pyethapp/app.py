@@ -40,6 +40,7 @@ from .db_service import DBService
 from .eth_service import ChainService
 from .jsonrpc import JSONRPCServer, IPCRPCServer
 from .pow_service import PoWService
+from .validator_service import ValidatorService
 from pyethapp import __version__
 from pyethapp.profiles import PROFILES, DEFAULT_PROFILE
 from pyethapp.utils import merge_dict, load_contrib_services, FallbackChoice, \
@@ -49,7 +50,7 @@ from pyethapp.utils import merge_dict, load_contrib_services, FallbackChoice, \
 log = slogging.get_logger('app')
 
 services = [DBService, AccountsService, NodeDiscovery, PeerManager, ChainService,
-            PoWService, JSONRPCServer, IPCRPCServer, Console]
+            PoWService, ValidatorService, JSONRPCServer, IPCRPCServer, Console]
 
 
 class EthApp(BaseApp):
@@ -88,6 +89,8 @@ class EthApp(BaseApp):
               help="Log to file instead of stderr.")
 @click.option('-b', '--bootstrap_node', multiple=False, type=str,
               help='single bootstrap_node as enode://pubkey@host:port')
+@click.option('--validate', multiple=True, type=str,
+              help='Validate with an account')
 @click.option('-m', '--mining_pct', multiple=False, type=int, default=0,
               help='pct cpu used for mining')
 @click.option('--unlock', multiple=True, type=str,
@@ -95,7 +98,7 @@ class EthApp(BaseApp):
 @click.option('--password', type=click.File(), help='path to a password file')
 @click.pass_context
 def app(ctx, profile, alt_config, config_values, alt_data_dir, log_config,
-        bootstrap_node, log_json, mining_pct, unlock, password, log_file):
+        bootstrap_node, log_json, validate, mining_pct, unlock, password, log_file):
     # configure logging
     slogging.configure(log_config, log_json=log_json, log_file=log_file)
 
@@ -164,6 +167,7 @@ def app(ctx, profile, alt_config, config_values, alt_data_dir, log_config,
     # Load genesis config
     app_config.update_config_from_genesis_json(config,
                                                genesis_json_filename_or_dict=config['eth']['genesis'])
+    config['validate'] = validate
     if bootstrap_node:
         # [NOTE]: check it
         config['discovery']['bootstrap_nodes'] = [to_string(bootstrap_node)]
@@ -543,7 +547,7 @@ def new_account(ctx, uuid):
     """
     app = ctx.obj['app']
     if uuid:
-        id_ = uuid4()  
+        id_ = uuid4()
     else:
         id_ = None
     password = ctx.obj['password']
@@ -583,7 +587,7 @@ def list_accounts(ctx):
                                                                  id='Id (if any)',
                                                                  locked='Locked'))
         for i, account in enumerate(accounts):
-            click.echo(fmt.format(i='#' + to_string(i + 1),
+            click.echo(fmt.format(i='#' + str(i + 1),
                                   address=encode_hex(account.address or ''),
                                   id=account.uuid or '',
                                   locked='yes' if account.locked else 'no'))

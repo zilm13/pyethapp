@@ -1,169 +1,184 @@
 from __future__ import print_function
-import time
-import random
-import gevent
 from devp2p.service import BaseService
 from ethereum.slogging import get_logger
-from ethereum.utils import privtoaddr, encode_hex, sha3
-from ethereum.casper_utils import generate_validation_code, call_casper, check_skips, \
-                                  get_timestamp, \
-                                  get_casper_ct, get_dunkle_candidates, sign_block, \
-                                  make_withdrawal_signature, RandaoManager
+from ethereum.messages import apply_transaction
+from ethereum.tools import tester
+from ethereum import transactions
+from ethereum import abi, utils
+from ethereum.hybrid_casper import casper_utils
 
 log = get_logger('validator')
-
-BLOCK_TIME = 3
-
-global_block_counter = 0
-
-casper_ct = get_casper_ct()
 
 class ValidatorService(BaseService):
 
     name = 'validator'
     default_config = dict(validator=dict(
-        activated=False,
+        validating=False,
         privkey='',
-        deposit_size=0,
-        seed=''
+        deposit_size=0
     ))
 
     def __init__(self, app):
         super(ValidatorService, self).__init__(app)
+        log.info('whats up whats up')
 
         self.config = app.config
 
         self.chainservice = app.services.chain
         self.chain = self.chainservice.chain
-        self.chain.time = lambda: int(time.time())
+        self.valcode_tx = None
+        self.deposit_tx = None
+        self.valcode_addr = None
+        self.has_broadcasted_deposit = False
+        self.votes = dict()
+        self.epoch_length = self.chain.env.config['EPOCH_LENGTH']
+        # self.chain.time = lambda: int(time.time())
 
-        self.key = self.config['validator']['privkey']
-        print("*"*100)
-        print(repr(self.key))
-        print(len(self.key))
-        self.address = privtoaddr(self.key)
-        self.validation_code = generate_validation_code(self.address)
-        self.validation_code_hash = sha3(self.validation_code)
-
-        # TODO: allow configure seed?
-        seed = sha3(self.key)
-        self.randao = RandaoManager(seed)
-
-        self.received_objects = {}
-        self.used_parents = {}
-
-        self.next_skip_count = 0
-        self.next_skip_timestamp = 0
-        self.epoch_length = self.call_casper('getEpochLength')
-        self.active = False
-        self.activated = self.app.config['validator']['activated']
+        if app.config['validate']:
+            self.coinbase = app.services.accounts.find(app.config['validate'][0])
+            self.nonce = self.chain.state.get_nonce(self.coinbase.address)
+            self.validating = True
+        else:
+            self.validating = False
 
         app.services.chain.on_new_head_cbs.append(self.on_new_head)
-        self.update_activity_status()
-        self.cached_head = self.chain.head_hash
 
     def on_new_head(self, block):
-        if not self.activated:
+        if not self.validating:
             return
         if self.app.services.chain.is_syncing:
             return
-        self.update()
+        state = self.chain.mk_poststate_of_blockhash(block.hash)
+        self.update(state)
 
-    def update_activity_status(self):
-        start_epoch = self.call_casper('getStartEpoch', [self.validation_code_hash])
-        now_epoch = self.call_casper('getEpoch')
-        end_epoch = self.call_casper('getEndEpoch', [self.validation_code_hash])
-        if start_epoch <= now_epoch < end_epoch:
-            self.active = True
-            self.next_skip_count = 0
-            self.next_skip_timestamp = get_timestamp(self.chain, self.next_skip_count)
-        else:
-            self.active = False
+    def broadcast_deposit(self):
+        if not self.valcode_tx or not self.deposit_tx:
+            # Generate transactions
+            valcode_tx = self.mk_validation_code_tx()
+            valcode_addr = utils.mk_contract_address(self.coinbase.address, self.nonce-1)
+            deposit_tx = self.mk_deposit_tx(3 * 10**18, valcode_addr)
+            # Verify the transactions pass
+            temp_state = self.chain.state.ephemeral_clone()
+            valcode_success, o1 = apply_transaction(temp_state, valcode_tx)
+            deposit_success, o2 = apply_transaction(temp_state, deposit_tx)
+            if not (valcode_success and deposit_success):
+                self.nonce = self.chain.state.get_nonce(self.coinbase.address)
+                raise Exception('Valcode tx or deposit tx failed')
+            self.valcode_tx = valcode_tx
+            log.info('Valcode Tx generated: {}'.format(str(valcode_tx)))
+            self.valcode_addr = valcode_addr
+            self.deposit_tx = deposit_tx
+            log.info('Deposit Tx generated: {}'.format(str(deposit_tx)))
+        self.chainservice.broadcast_transaction(valcode_tx)
 
-    def tick(self):
-        delay = 0
-        # Try to create a block
-        # Conditions:
-        # (i) you are an active validator,
-        # (ii) you have not yet made a block with this parent
-        if self.active and self.chain.head_hash not in self.used_parents:
-            t = time.time()
-            # Is it early enough to create the block?
-            if t >= self.next_skip_timestamp and (not self.chain.head or t > self.chain.head.header.timestamp):
-                # Wrong validator; in this case, just wait for the next skip count
-                if not check_skips(self.chain, self.validation_code_hash, self.next_skip_count):
-                    self.next_skip_count += 1
-                    self.next_skip_timestamp = get_timestamp(self.chain, self.next_skip_count)
-                    log.debug('Not my turn, wait',
-                              next_skip_count=self.next_skip_count,
-                              next_skip_timestamp=self.next_skip_timestamp,
-                              now=int(time.time()))
-                    return
-                self.used_parents[self.chain.head_hash] = True
-                blk = self.make_block()
-                assert blk.timestamp >= self.next_skip_timestamp
-                if self.chainservice.add_mined_block(blk):
-                    self.received_objects[blk.hash] = True
-                    log.debug('0x%s made and added block %d (%s) to chain' % (encode_hex(self.address[:8]), blk.header.number, encode_hex(blk.header.hash[:8])))
-                else:
-                    log.debug('0x%s failed to make and add block %d (%s) to chain' % (encode_hex(self.address[:8]), blk.header.number, encode_hex(blk.header.hash[:8])))
-                self.update()
-            else:
-                delay = max(self.next_skip_timestamp - t, 0)
-        # Sometimes we received blocks too early or out of order;
-        # run an occasional loop that processes these
-        if random.random() < 0.02:
-            self.chain.process_time_queue()
-            self.chain.process_parent_queue()
-            self.update()
-        return delay
+    def update(self, state):
+        if not self.valcode_tx or not self.deposit_tx:
+            self.broadcast_deposit()
+        if not self.has_broadcasted_deposit and state.get_code(self.valcode_addr):
+            log.info('Found code!')
+            self.chainservice.broadcast_transaction(self.deposit_tx)
+            self.has_broadcasted_deposit = True
+        log.info('Validator index: {}'.format(self.get_validator_index(state)))
 
-    def make_block(self):
-        pre_dunkle_count = self.call_casper('getTotalDunklesIncluded')
-        dunkle_txs = get_dunkle_candidates(self.chain, self.chain.state)
-        blk = self.chainservice.head_candidate
-        randao = self.randao.get_parent(self.call_casper('getRandao', [self.validation_code_hash]))
-        blk = sign_block(blk, self.key, randao, self.validation_code_hash, self.next_skip_count)
-        # Make sure it's valid
-        global global_block_counter
-        global_block_counter += 1
-        for dtx in dunkle_txs:
-            assert dtx in blk.transactions, (dtx, blk.transactions)
-            log.debug('made block with timestamp %d and %d dunkles' % (blk.timestamp, len(dunkle_txs)))
-        return blk
+        casper = tester.ABIContract(tester.State(state), casper_utils.casper_abi,
+                                    self.chain.casper_address)
+        try:
+            log.info('&&& '.format())
+            log.info('Vote percent: {} - Recommended Source: {} - Current Epoch: {}'
+                     .format(casper.get_main_hash_voted_frac(),
+                             casper.get_recommended_source_epoch(), casper.get_current_epoch()))
+            is_justified = casper.get_votes__is_justified(casper.get_current_epoch())
+            is_finalized = casper.get_votes__is_finalized(casper.get_current_epoch()-1)
+            if is_justified:
+                log.info('Justified epoch: {}'.format(casper.get_current_epoch()))
+            if is_finalized:
+                log.info('Finalized epoch: {}'.format(casper.get_current_epoch()-1))
+        except:
+            log.info('&&& Vote frac failed')
 
-    def update(self):
-        if self.cached_head == self.chain.head_hash:
-            return
-        self.cached_head = self.chain.head_hash
-        if self.chain.state.block_number % self.epoch_length == 0:
-            self.update_activity_status()
-        if self.active:
-            self.next_skip_count = 0
-            self.next_skip_timestamp = get_timestamp(self.chain, self.next_skip_count)
-        log.debug('Head changed: %s, will attempt creating a block at %d' % (encode_hex(self.chain.head_hash), self.next_skip_timestamp))
+        # Vote
+        # Generate vote messages and broadcast if possible
+        vote_msg = self.generate_vote_message(state)
+        if vote_msg:
+            vote_tx = self.mk_vote_tx(vote_msg)
+            self.chainservice.broadcast_transaction(vote_tx)
+            log.info('Sent vote! Tx: {}'.format(str(vote_tx)))
 
-    def withdraw(self, gasprice=20 * 10**9):
-        sigdata = make_withdrawal_signature(self.key)
-        txdata = casper_ct.encode('startWithdrawal', [self.validation_code_hash, sigdata])
-        tx = Transaction(self.chain.state.get_nonce(self.address), gasprice, 650000, self.chain.config['CASPER_ADDR'], 0, txdata).sign(self.key)
-        self.chainservice.add_transaction(tx, force=True)
+    def get_recommended_casper_msg_contents(self, state, casper, validator_index):
+        curepoch = casper.get_current_epoch()
+        if curepoch == 0:
+            return None, None, None
+        tgthash = casper.get_recommended_target_hash()
+        sourceepoch = casper.get_recommended_source_epoch()
+        return tgthash, curepoch, sourceepoch
+        # return \
+        #     casper.get_recommended_target_hash(), casper.get_current_epoch(), \
+        #     casper.get_recommended_source_epoch()
 
-    def deposit(self, gasprice=20 * 10**9):
-        assert value * 10**18 >= self.chain.state.get_balance(self.address) + gasprice * 1000000
-        tx = Transaction(self.chain.state.get_nonce(self.address) * 10**18, gasprice, 1000000,
-                         casper_config['CASPER_ADDR'], value * 10**18,
-                         ct.encode('deposit', [self.validation_code, self.randao.get(9999)]))
+    def epoch_blockhash(self, state, epoch):
+        if epoch == 0:
+            return b'\x00' * 32
+        return state.prev_headers[epoch*self.epoch_length * -1 - 1].hash
 
-    def call_casper(self, fun, args=[]):
-        return call_casper(self.chain.state, fun, args)
+    def generate_vote_message(self, state):
+        epoch = state.block_number // self.epoch_length
+        # NO_DBL_VOTE: Don't vote if we have already
+        if epoch in self.votes:
+            return None
+        # TODO: Check for NO_SURROUND_VOTE
+        # Create a Casper contract which we can use to get related values
+        casper = tester.ABIContract(tester.State(state), casper_utils.casper_abi, self.chain.casper_address)
+        # Get the ancestry hash and source ancestry hash
+        validator_index = self.get_validator_index(state)
+        target_hash, epoch, source_epoch = self.get_recommended_casper_msg_contents(state, casper, validator_index)
+        if target_hash is None:
+            return None
+        vote_msg = casper_utils.mk_vote(validator_index, target_hash, epoch, source_epoch, self.coinbase.privkey)
+        try:  # Attempt to submit the vote, to make sure that it is justified
+            casper.vote(vote_msg)
+        except tester.TransactionFailed:
+            log.info('Vote failed! Validator {} - validator start {} - valcode addr {}'
+                     .format(self.get_validator_index(state),
+                             casper.get_validators__start_dynasty(validator_index),
+                             utils.encode_hex(self.valcode_addr)))
+            return None
+        # Save the vote message we generated
+        self.votes[epoch] = vote_msg
+        log.info('Vote submitted: validator %d - epoch %d - source_epoch %d - hash %s' %
+                 (self.get_validator_index(state), epoch, source_epoch, utils.encode_hex(self.epoch_blockhash(state, epoch))))
+        return vote_msg
 
-    def _run(self):
-        while True:
-            if self.activated:
-                delay = self.tick()
-                gevent.sleep(delay)
+    def get_validator_index(self, state):
+        t = tester.State(state.ephemeral_clone())
+        casper = tester.ABIContract(t, casper_utils.casper_abi, self.chain.casper_address)
+        if self.valcode_addr is None:
+            raise Exception('Valcode address not set')
+        try:
+            return casper.get_validator_indexes(self.coinbase.address)
+        except tester.TransactionFailed:
+            return None
 
-    def stop(self):
-        super(ValidatorService, self).stop()
+    def mk_transaction(self, to=b'\x00' * 20, value=0, data=b'',
+                       gasprice=tester.GASPRICE, startgas=tester.STARTGAS, nonce=None):
+        if nonce is None:
+            nonce = self.chain.state.get_nonce(self.coinbase.address)
+        tx = transactions.Transaction(nonce, gasprice, startgas, to, value, data)
+        self.coinbase.sign_tx(tx)
+        self.nonce += 1
+        return tx
 
+    def mk_validation_code_tx(self):
+        valcode_tx = self.mk_transaction('', 0, casper_utils.mk_validation_code(self.coinbase.address), nonce=self.nonce)
+        return valcode_tx
+
+    def mk_deposit_tx(self, value, valcode_addr):
+        casper_ct = abi.ContractTranslator(casper_utils.casper_abi)
+        deposit_func = casper_ct.encode('deposit', [valcode_addr, self.coinbase.address])
+        deposit_tx = self.mk_transaction(self.chain.casper_address, value, deposit_func, nonce=self.nonce)
+        return deposit_tx
+
+    def mk_vote_tx(self, vote_msg):
+        casper_ct = abi.ContractTranslator(casper_utils.casper_abi)
+        vote_func = casper_ct.encode('vote', [vote_msg])
+        vote_tx = self.mk_transaction(to=self.chain.casper_address, value=0, startgas=1000000, data=vote_func)
+        return vote_tx
