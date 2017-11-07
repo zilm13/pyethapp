@@ -36,7 +36,6 @@ class ValidatorService(BaseService):
 
         if app.config['validate']:
             self.coinbase = app.services.accounts.find(app.config['validate'][0])
-            self.nonce = self.chain.state.get_nonce(self.coinbase.address)
             self.validating = True
         else:
             self.validating = False
@@ -53,17 +52,15 @@ class ValidatorService(BaseService):
 
     def broadcast_deposit(self):
         if not self.valcode_tx or not self.deposit_tx:
+            nonce = self.chain.state.get_nonce(self.coinbase.address)
             # Generate transactions
-            valcode_tx = self.mk_validation_code_tx()
-            valcode_addr = utils.mk_contract_address(self.coinbase.address, self.nonce-1)
-            deposit_tx = self.mk_deposit_tx(3 * 10**18, valcode_addr)
+            valcode_tx = self.mk_validation_code_tx(nonce)
+            valcode_addr = utils.mk_contract_address(self.coinbase.address, nonce)
+            deposit_tx = self.mk_deposit_tx(3 * 10**18, valcode_addr, nonce+1)
             # Verify the transactions pass
             temp_state = self.chain.state.ephemeral_clone()
             valcode_success, o1 = apply_transaction(temp_state, valcode_tx)
             deposit_success, o2 = apply_transaction(temp_state, deposit_tx)
-            if not (valcode_success and deposit_success):
-                self.nonce = self.chain.state.get_nonce(self.coinbase.address)
-                raise Exception('Valcode tx or deposit tx failed')
             self.valcode_tx = valcode_tx
             log.info('Valcode Tx generated: {}'.format(str(valcode_tx)))
             self.valcode_addr = valcode_addr
@@ -164,17 +161,16 @@ class ValidatorService(BaseService):
             nonce = self.chain.state.get_nonce(self.coinbase.address)
         tx = transactions.Transaction(nonce, gasprice, startgas, to, value, data)
         self.coinbase.sign_tx(tx)
-        self.nonce += 1
         return tx
 
-    def mk_validation_code_tx(self):
-        valcode_tx = self.mk_transaction('', 0, casper_utils.mk_validation_code(self.coinbase.address), nonce=self.nonce)
+    def mk_validation_code_tx(self, nonce):
+        valcode_tx = self.mk_transaction('', 0, casper_utils.mk_validation_code(self.coinbase.address), nonce=nonce)
         return valcode_tx
 
-    def mk_deposit_tx(self, value, valcode_addr):
+    def mk_deposit_tx(self, value, valcode_addr, nonce):
         casper_ct = abi.ContractTranslator(casper_utils.casper_abi)
         deposit_func = casper_ct.encode('deposit', [valcode_addr, self.coinbase.address])
-        deposit_tx = self.mk_transaction(self.chain.casper_address, value, deposit_func, nonce=self.nonce)
+        deposit_tx = self.mk_transaction(self.chain.casper_address, value, deposit_func, nonce=nonce)
         return deposit_tx
 
     def mk_vote_tx(self, vote_msg):
