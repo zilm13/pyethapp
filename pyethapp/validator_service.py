@@ -31,6 +31,8 @@ class ValidatorService(BaseService):
         self.valcode_addr = None
         self.has_broadcasted_deposit = False
         self.votes = dict()
+        self.latest_target_epoch = -1
+        self.latest_source_epoch = -1
         self.epoch_length = self.chain.env.config['EPOCH_LENGTH']
         # self.chain.time = lambda: int(time.time())
 
@@ -68,6 +70,21 @@ class ValidatorService(BaseService):
             log.info('Deposit Tx generated: {}'.format(str(deposit_tx)))
         self.chainservice.broadcast_transaction(valcode_tx)
 
+    def broadcast_logout(self, login_logout_flag):
+        epoch = self.chain.state.block_number // self.epoch_length
+        # Generage the message
+        logout_msg = casper_utils.mk_logout(self.get_validator_index(self.chain.state),
+                                            epoch, self.coinbase.privkey)
+        # Generate transactions
+        logout_tx = self.mk_logout_tx(logout_msg)
+        # Verify the transactions pass
+        temp_state = self.chain.state.ephemeral_clone()
+        logout_success, o1 = apply_transaction(temp_state, logout_tx)
+        if not logout_success:
+            raise Exception('Valcode tx or deposit tx failed')
+        log.info('Login/logout Tx generated: {}'.format(str(logout_tx)))
+        self.chainservice.broadcast_transaction(logout_tx)
+
     def update(self, state):
         if not self.valcode_tx or not self.deposit_tx:
             self.broadcast_deposit()
@@ -81,8 +98,8 @@ class ValidatorService(BaseService):
                                     self.chain.casper_address)
         try:
             log.info('&&& '.format())
-            log.info('Vote percent: {} - Recommended Source: {} - Current Epoch: {}'
-                     .format(casper.get_main_hash_voted_frac(),
+            log.info('Vote percent: {} - Deposits: {} - Recommended Source: {} - Current Epoch: {}'
+                     .format(casper.get_main_hash_voted_frac(), casper.get_total_curdyn_deposits(),
                              casper.get_recommended_source_epoch(), casper.get_current_epoch()))
             is_justified = casper.get_votes__is_justified(casper.get_current_epoch())
             is_finalized = casper.get_votes__is_finalized(casper.get_current_epoch()-1)
@@ -122,13 +139,15 @@ class ValidatorService(BaseService):
         # NO_DBL_VOTE: Don't vote if we have already
         if epoch in self.votes:
             return None
-        # TODO: Check for NO_SURROUND_VOTE
         # Create a Casper contract which we can use to get related values
         casper = tester.ABIContract(tester.State(state), casper_utils.casper_abi, self.chain.casper_address)
         # Get the ancestry hash and source ancestry hash
         validator_index = self.get_validator_index(state)
         target_hash, epoch, source_epoch = self.get_recommended_casper_msg_contents(state, casper, validator_index)
         if target_hash is None:
+            return None
+        # Prevent NO_SURROUND slash
+        if epoch < self.latest_target_epoch or source_epoch < self.latest_source_epoch:
             return None
         vote_msg = casper_utils.mk_vote(validator_index, target_hash, epoch, source_epoch, self.coinbase.privkey)
         try:  # Attempt to submit the vote, to make sure that it is justified
@@ -141,6 +160,8 @@ class ValidatorService(BaseService):
             return None
         # Save the vote message we generated
         self.votes[epoch] = vote_msg
+        self.latest_target_epoch = epoch
+        self.latest_source_epoch = source_epoch
         log.info('Vote submitted: validator %d - epoch %d - source_epoch %d - hash %s' %
                  (self.get_validator_index(state), epoch, source_epoch, utils.encode_hex(self.epoch_blockhash(state, epoch))))
         return vote_msg
@@ -172,6 +193,12 @@ class ValidatorService(BaseService):
         deposit_func = casper_ct.encode('deposit', [valcode_addr, self.coinbase.address])
         deposit_tx = self.mk_transaction(self.chain.casper_address, value, deposit_func, nonce=nonce)
         return deposit_tx
+
+    def mk_logout_tx(self, login_logout_msg):
+        casper_ct = abi.ContractTranslator(casper_utils.casper_abi)
+        logout_func = casper_ct.encode('logout', [login_logout_msg])
+        logout_tx = self.mk_transaction(self.chain.casper_address, data=logout_func)
+        return logout_tx
 
     def mk_vote_tx(self, vote_msg):
         casper_ct = abi.ContractTranslator(casper_utils.casper_abi)
