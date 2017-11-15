@@ -178,6 +178,7 @@ class ChainService(WiredService):
         ALLOC = {a: {'balance': 500*10**19} for a in accounts}
         # TODO: Remove this dumb default alloc
         ALLOC[decode_hex('7d577a597b2742b498cb5cf0c26cdcd726d39e6e')] = {'balance': 500*10**19}
+        ALLOC[decode_hex('b96611e02f9eff3c8afc6226d4ebfa81a821547c')] = {'balance': 500*10**19}
         genesis_data = casper_utils.make_casper_genesis(ALLOC, 5, 100, 0.02, 0.002)
         self.chain = Chain(genesis=genesis_data, reset_genesis=True, coinbase=coinbase, new_head_cb=self._on_new_head)
         header = self.chain.state.prev_headers[0]

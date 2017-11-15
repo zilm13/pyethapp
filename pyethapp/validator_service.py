@@ -20,7 +20,6 @@ class ValidatorService(BaseService):
 
     def __init__(self, app):
         super(ValidatorService, self).__init__(app)
-        log.info('whats up whats up')
 
         self.config = app.config
 
@@ -119,15 +118,12 @@ class ValidatorService(BaseService):
             log.info('Sent vote! Tx: {}'.format(str(vote_tx)))
 
     def get_recommended_casper_msg_contents(self, state, casper, validator_index):
-        curepoch = casper.get_current_epoch()
-        if curepoch == 0:
+        current_epoch = casper.get_current_epoch()
+        if current_epoch == 0:
             return None, None, None
-        tgthash = casper.get_recommended_target_hash()
-        sourceepoch = casper.get_recommended_source_epoch()
-        return tgthash, curepoch, sourceepoch
-        # return \
-        #     casper.get_recommended_target_hash(), casper.get_current_epoch(), \
-        #     casper.get_recommended_source_epoch()
+        return \
+            casper.get_recommended_target_hash(), casper.get_current_epoch(), \
+            casper.get_recommended_source_epoch()
 
     def epoch_blockhash(self, state, epoch):
         if epoch == 0:
