@@ -49,8 +49,7 @@ class ValidatorService(BaseService):
             return
         if self.app.services.chain.is_syncing:
             return
-        state = self.chain.mk_poststate_of_blockhash(block.hash)
-        self.update(state)
+        self.update()
 
     def broadcast_deposit(self):
         if not self.valcode_tx or not self.deposit_tx:
@@ -85,16 +84,16 @@ class ValidatorService(BaseService):
         log.info('Login/logout Tx generated: {}'.format(str(logout_tx)))
         self.chainservice.broadcast_transaction(logout_tx)
 
-    def update(self, state):
+    def update(self):
         if not self.valcode_tx or not self.deposit_tx:
             self.broadcast_deposit()
-        if not self.has_broadcasted_deposit and state.get_code(self.valcode_addr):
+        if not self.has_broadcasted_deposit and self.chain.state.get_code(self.valcode_addr):
             log.info('Found code!')
             self.chainservice.broadcast_transaction(self.deposit_tx)
             self.has_broadcasted_deposit = True
-        log.info('Validator index: {}'.format(self.get_validator_index(state)))
+        log.info('Validator index: {}'.format(self.get_validator_index(self.chain.state)))
 
-        casper = tester.ABIContract(tester.State(state), casper_utils.casper_abi,
+        casper = tester.ABIContract(tester.State(self.chain.state.ephemeral_clone()), casper_utils.casper_abi,
                                     self.chain.casper_address)
         try:
             log.info('&&& '.format())
@@ -112,30 +111,44 @@ class ValidatorService(BaseService):
 
         # Vote
         # Generate vote messages and broadcast if possible
-        vote_msg = self.generate_vote_message(state)
+        vote_msg = self.generate_vote_message()
         if vote_msg:
             vote_tx = self.mk_vote_tx(vote_msg)
             self.chainservice.broadcast_transaction(vote_tx)
             log.info('Sent vote! Tx: {}'.format(str(vote_tx)))
 
-    def get_recommended_casper_msg_contents(self, state, casper, validator_index):
-        curepoch = casper.get_current_epoch()
-        if curepoch == 0:
+    def get_recommended_casper_msg_contents(self, casper, validator_index):
+        current_epoch = casper.get_current_epoch()
+        if current_epoch == 0:
             return None, None, None
-        tgthash = casper.get_recommended_target_hash()
-        sourceepoch = casper.get_recommended_source_epoch()
-        return tgthash, curepoch, sourceepoch
-        # return \
-        #     casper.get_recommended_target_hash(), casper.get_current_epoch(), \
-        #     casper.get_recommended_source_epoch()
+        # NOTE: Using `epoch_blockhash` because currently calls to `blockhash` within contracts
+        # in the ephemeral state are off by one, so we can't use `get_recommended_target_hash()` :(
+        target_hash = self.epoch_blockhash(current_epoch)
+        source_epoch = casper.get_recommended_source_epoch()
+        return target_hash, current_epoch, source_epoch
 
-    def epoch_blockhash(self, state, epoch):
+    def epoch_blockhash(self, epoch):
         if epoch == 0:
             return b'\x00' * 32
-        return state.prev_headers[epoch*self.epoch_length * -1 - 1].hash
+        return self.chain.get_block_by_number(epoch*self.epoch_length-1).hash
 
-    def generate_vote_message(self, state):
+    def is_logged_in(self, casper, target_epoch, validator_index):
+        start_dynasty = casper.get_validators__start_dynasty(validator_index)
+        end_dynasty = casper.get_validators__end_dynasty(validator_index)
+        current_dynasty = casper.get_dynasty_in_epoch(target_epoch)
+        past_dynasty = current_dynasty - 1
+        in_current_dynasty = ((start_dynasty <= current_dynasty) and (current_dynasty < end_dynasty))
+        in_prev_dynasty = ((start_dynasty <= past_dynasty) and (past_dynasty < end_dynasty))
+        if not (in_current_dynasty or in_prev_dynasty):
+            return False
+        return True
+
+    def generate_vote_message(self):
+        state = self.chain.state.ephemeral_clone()
         epoch = state.block_number // self.epoch_length
+        # TODO: Add logic which waits until a specific blockheight before submitting vote, something like:
+        # if state.block_number % self.epoch_length < 1:
+        #     return None
         # NO_DBL_VOTE: Don't vote if we have already
         if epoch in self.votes:
             return None
@@ -143,27 +156,23 @@ class ValidatorService(BaseService):
         casper = tester.ABIContract(tester.State(state), casper_utils.casper_abi, self.chain.casper_address)
         # Get the ancestry hash and source ancestry hash
         validator_index = self.get_validator_index(state)
-        target_hash, epoch, source_epoch = self.get_recommended_casper_msg_contents(state, casper, validator_index)
+        target_hash, epoch, source_epoch = self.get_recommended_casper_msg_contents(casper, validator_index)
         if target_hash is None:
             return None
         # Prevent NO_SURROUND slash
         if epoch < self.latest_target_epoch or source_epoch < self.latest_source_epoch:
             return None
-        vote_msg = casper_utils.mk_vote(validator_index, target_hash, epoch, source_epoch, self.coinbase.privkey)
-        try:  # Attempt to submit the vote, to make sure that it is justified
-            casper.vote(vote_msg)
-        except tester.TransactionFailed:
-            log.info('Vote failed! Validator {} - validator start {} - valcode addr {}'
-                     .format(self.get_validator_index(state),
-                             casper.get_validators__start_dynasty(validator_index),
-                             utils.encode_hex(self.valcode_addr)))
+        # Verify that we are either in the current dynasty or prev dynasty --     assert in_current_dynasty or in_prev_dynasty
+        if not self.is_logged_in(casper, epoch, validator_index):
+            log.info('Validator not logged in yet!')
             return None
+        vote_msg = casper_utils.mk_vote(validator_index, target_hash, epoch, source_epoch, self.coinbase.privkey)
         # Save the vote message we generated
         self.votes[epoch] = vote_msg
         self.latest_target_epoch = epoch
         self.latest_source_epoch = source_epoch
         log.info('Vote submitted: validator %d - epoch %d - source_epoch %d - hash %s' %
-                 (self.get_validator_index(state), epoch, source_epoch, utils.encode_hex(self.epoch_blockhash(state, epoch))))
+                 (self.get_validator_index(state), epoch, source_epoch, utils.encode_hex(target_hash)))
         return vote_msg
 
     def get_validator_index(self, state):
