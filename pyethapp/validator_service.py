@@ -57,7 +57,7 @@ class ValidatorService(BaseService):
             # Generate transactions
             valcode_tx = self.mk_validation_code_tx(nonce)
             valcode_addr = utils.mk_contract_address(self.coinbase.address, nonce)
-            deposit_tx = self.mk_deposit_tx(3 * 10**18, valcode_addr, nonce+1)
+            deposit_tx = self.mk_deposit_tx(5000 * 10**18, valcode_addr, nonce+1)
             # Verify the transactions pass
             temp_state = self.chain.state.ephemeral_clone()
             valcode_success, o1 = apply_transaction(temp_state, valcode_tx)
