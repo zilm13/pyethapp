@@ -20,7 +20,6 @@ class ValidatorService(BaseService):
 
     def __init__(self, app):
         super(ValidatorService, self).__init__(app)
-        log.info('whats up whats up')
 
         self.config = app.config
 
