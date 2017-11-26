@@ -46,3 +46,7 @@ docs/_build
 
 # virtualenv
 .venv
+
+# IDE crud
+.idea
+*.iml
