@@ -174,8 +174,7 @@ class ChainService(WiredService):
         # self.chain = Chain(
         #     env=env, genesis=genesis_data, coinbase=coinbase,
         #     new_head_cb=self._on_new_head)
-        accounts = [coinbase]
-        ALLOC = {a: {'balance': 500*10**19} for a in accounts}
+        ALLOC = {}
         # TODO: Remove this dumb default alloc
         ALLOC[decode_hex('7d577a597b2742b498cb5cf0c26cdcd726d39e6e')] = {'balance': 50000*10**19}
         ALLOC[decode_hex('b96611e02f9eff3c8afc6226d4ebfa81a821547c')] = {'balance': 50000*10**19}
