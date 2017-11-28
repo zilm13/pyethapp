@@ -512,8 +512,8 @@ class ChainService(WiredService):
 
     def on_receive_status(self, proto, eth_version, network_id, chain_difficulty, chain_head_hash,
                           genesis_hash):
-        log.debug('----------------------------------')
-        log.debug('status received', proto=proto, eth_version=eth_version)
+        # log.debug('----------------------------------')
+        # log.debug('status received', proto=proto, eth_version=eth_version)
 
         if eth_version != proto.version:
             if ('eth', proto.version) in proto.peer.remote_capabilities:
@@ -521,14 +521,14 @@ class ChainService(WiredService):
                 # even the peer tried a different version
                 pass
             else:
-                log.debug("no capable protocol to use, disconnect",
-                          proto=proto, eth_version=eth_version)
+                # log.debug("no capable protocol to use, disconnect",
+                #           proto=proto, eth_version=eth_version)
                 proto.send_disconnect(proto.disconnect.reason.useless_peer)
                 return
 
         if network_id != self.config['eth'].get('network_id', proto.network_id):
-            log.debug("invalid network id", remote_network_id=network_id,
-                     expected_network_id=self.config['eth'].get('network_id', proto.network_id))
+            # log.debug("invalid network id", remote_network_id=network_id,
+            #          expected_network_id=self.config['eth'].get('network_id', proto.network_id))
             raise eth_protocol.ETHProtocolError('wrong network_id')
 
         # check genesis
