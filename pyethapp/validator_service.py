@@ -27,6 +27,7 @@ class ValidatorService(BaseService):
         self.chain = self.chainservice.chain
         self.valcode_tx = None
         self.deposit_tx = None
+        self.deposit_size = 5000 * 10**18
         self.valcode_addr = None
         self.has_broadcasted_deposit = False
         self.votes = dict()
@@ -56,7 +57,7 @@ class ValidatorService(BaseService):
             # Generate transactions
             valcode_tx = self.mk_validation_code_tx(nonce)
             valcode_addr = utils.mk_contract_address(self.coinbase.address, nonce)
-            deposit_tx = self.mk_deposit_tx(5000 * 10**18, valcode_addr, nonce+1)
+            deposit_tx = self.mk_deposit_tx(self.deposit_size, valcode_addr, nonce+1)
             # Verify the transactions pass
             temp_state = self.chain.state.ephemeral_clone()
             valcode_success, o1 = apply_transaction(temp_state, valcode_tx)
@@ -84,6 +85,9 @@ class ValidatorService(BaseService):
         self.chainservice.broadcast_transaction(logout_tx)
 
     def update(self):
+        if self.chain.state.get_balance(self.coinbase.address) < self.deposit_size:
+            log.info('Cannot login as validator: Not enough ETH!')
+            return
         if not self.valcode_tx or not self.deposit_tx:
             self.broadcast_deposit()
         if not self.has_broadcasted_deposit and self.chain.state.get_code(self.valcode_addr):
