@@ -487,8 +487,8 @@ class ChainService(WiredService):
     # wire protocol receivers ###########
 
     def on_wire_protocol_start(self, proto):
-        log.debug('----------------------------------')
-        log.debug('on_wire_protocol_start', proto=proto)
+        # log.debug('----------------------------------')
+        # log.debug('on_wire_protocol_start', proto=proto)
         assert isinstance(proto, self.wire_protocol)
         # register callbacks
         proto.receive_status_callbacks.append(self.on_receive_status)
@@ -507,8 +507,8 @@ class ChainService(WiredService):
 
     def on_wire_protocol_stop(self, proto):
         assert isinstance(proto, self.wire_protocol)
-        log.debug('----------------------------------')
-        log.debug('on_wire_protocol_stop', proto=proto)
+        # log.debug('----------------------------------')
+        # log.debug('on_wire_protocol_stop', proto=proto)
 
     def on_receive_status(self, proto, eth_version, network_id, chain_difficulty, chain_head_hash,
                           genesis_hash):
