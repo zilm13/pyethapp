@@ -134,10 +134,13 @@ class ValidatorService(BaseService):
 
     def generate_vote_message(self):
         state = self.chain.state.ephemeral_clone()
-        # TODO: Add logic which waits until a specific blockheight before submitting vote, something like:
-        # if state.block_number % self.epoch_length < 1:
-        #     return None
         target_epoch = state.block_number // self.epoch_length
+        # Wait until a specific blockheight before submitting vote
+        wait_blocks = self.epoch_length // 4
+        epoch_block_number = state.block_number % self.epoch_length
+        if epoch_block_number < wait_blocks:
+            log.info('[hybrid_casper] Waiting for epoch block {} to submit vote, now block {}'.format(wait_blocks, epoch_block_number))
+            return None
         # NO_DBL_VOTE: Don't vote if we have already
         if target_epoch in self.votes:
             log.info('[hybrid_casper] Already voted for this epoch as target ({}), not voting again'.format(target_epoch))
