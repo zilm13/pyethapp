@@ -29,7 +29,7 @@ class ValidatorService(BaseService):
         self.deposit_tx = None
         self.deposit_size = 5000 * 10**18
         self.valcode_addr = None
-        self.has_broadcasted_deposit = False
+        self.did_broadcast_deposit = False
         self.votes = dict()
         self.latest_target_epoch = -1
         self.latest_source_epoch = -1
@@ -50,23 +50,33 @@ class ValidatorService(BaseService):
             return
         self.update()
 
-    def generate_valcode_and_deposit_tx(self):
+    def generate_valcode_tx(self):
         nonce = self.chain.state.get_nonce(self.coinbase.address)
-        # Generate transactions
+        # Generate transaction
         valcode_tx = self.mk_validation_code_tx(nonce)
         valcode_addr = utils.mk_contract_address(self.coinbase.address, nonce)
-        deposit_tx = self.mk_deposit_tx(self.deposit_size, valcode_addr, nonce+1)
-        # Verify the transactions pass
+        # Verify the transaction passes
         temp_state = self.chain.state.ephemeral_clone()
         valcode_success, o1 = apply_transaction(temp_state, valcode_tx)
-        deposit_success, o2 = apply_transaction(temp_state, deposit_tx)
 
         # We should never generate invalid txs
-        assert valcode_success and deposit_success
+        assert valcode_success
 
         self.valcode_tx = valcode_tx
         log.info('Valcode Tx generated: {}'.format(str(valcode_tx)))
         self.valcode_addr = valcode_addr
+
+    def generate_deposit_tx(self):
+        nonce = self.chain.state.get_nonce(self.coinbase.address)
+        # Generate transaction
+        deposit_tx = self.mk_deposit_tx(self.deposit_size, valcode_addr, nonce+1)
+        # Verify the transaction passes
+        temp_state = self.chain.state.ephemeral_clone()
+        deposit_success, o2 = apply_transaction(temp_state, deposit_tx)
+
+        # We should never generate invalid txs
+        assert deposit_success
+
         self.deposit_tx = deposit_tx
         log.info('Deposit Tx generated: {}'.format(str(deposit_tx)))
 
@@ -86,20 +96,41 @@ class ValidatorService(BaseService):
         self.chainservice.broadcast_transaction(logout_tx)
 
     def update(self):
+        # Make sure we have enough ETH to deposit
         if self.chain.state.get_balance(self.coinbase.address) < self.deposit_size:
             log.info('[hybrid_casper] Cannot login as validator: insufficient balance')
             return
-        if not self.valcode_tx or not self.deposit_tx:
-            self.generate_valcode_and_deposit_tx()
+
+        # Note about valcode and deposit transactions: these need to be broadcast in
+        # a particular order, valcode first. In order to ensure this, we check that
+        # the valcode tx exists before we attempt to broadcast the deposit tx.
+
+        # Generate valcode and deposit transactions
+        elif not self.valcode_tx:
+            self.generate_valcode_tx()
+            log.info('[hybrid_casper] Broadcasting valcode tx and waiting for it to be mined')
             self.chainservice.broadcast_transaction(self.valcode_tx)
-        # LANE Can't this be done synchronously after generating the deposit tx?
-        # LANE: need to persist has_broadcasted_deposit so we don't do this twice
-        # Also need to allow login->logout->login, need to check if "logged in"
-        if  self.chain.state.get_code(self.valcode_addr) and not self.has_broadcasted_deposit:
+
+            # Wait for it to be mined
+            return
+
+        # No point in going beyond this point until the valcode tx is mined
+        elif not self.chain.state.get_code(self.valcode_addr):
+            log.info('[hybrid_casper] Waiting for valcode tx to be mined')
+            return
+
+        # Now we can broadcast the deposit
+        elif not self.did_broadcast_deposit:
+            self.generate_deposit_tx()
             log.info('[hybrid_casper] Broadcasting deposit tx')
             self.chainservice.broadcast_transaction(self.deposit_tx)
-            self.has_broadcasted_deposit = True
-        log.info('[hybrid_casper] Validator index: {}'.format(self.get_validator_index(self.chain.state)))
+            self.did_broadcast_deposit = True
+
+            # Wait for it to be mined
+            return
+
+        # We are clear to vote!
+        log.info('[hybrid_casper] Active validator index: {}'.format(self.get_validator_index(self.chain.state)))
 
         casper = tester.ABIContract(tester.State(self.chain.state.ephemeral_clone()), casper_utils.casper_abi,
                                     self.chain.casper_address)
@@ -122,6 +153,8 @@ class ValidatorService(BaseService):
             vote_tx = self.mk_vote_tx(vote_msg)
             log.info('[hybrid_casper] Broadcasting vote: {}'.format(str(vote_tx)))
             self.chainservice.broadcast_transaction(vote_tx)
+        else:
+            log.info('[hybrid_casper] Not voting this round')
 
     def is_logged_in(self, casper, target_epoch, validator_index):
         start_dynasty = casper.get_validators__start_dynasty(validator_index)
