@@ -45,8 +45,10 @@ class ValidatorService(BaseService):
 
     def on_new_head(self, block):
         if not self.validating:
+            log.info('[hybrid_casper] not validating, not updating')
             return
         if self.app.services.chain.is_syncing:
+            log.info('[hybrid_casper] chain syncing, not updating')
             return
         self.update()
 
@@ -96,6 +98,7 @@ class ValidatorService(BaseService):
         self.chainservice.broadcast_transaction(logout_tx)
 
     def update(self):
+        log.info('[hybrid_casper] validator {} updating'.format(self))
         # Make sure we have enough ETH to deposit
         if self.chain.state.get_balance(self.coinbase.address) < self.deposit_size:
             log.info('[hybrid_casper] Cannot login as validator: insufficient balance')
