@@ -6,11 +6,11 @@ from devp2p.service import BaseService
 from ethereum.config import default_config
 from pyethapp.config import update_config_with_defaults, get_default_config
 from ethereum.slogging import get_logger, configure_logging
+from ethereum.hybrid_casper import chain as hybrid_casper_chain
 from ethereum.tools import tester
 from ethereum.pow.ethpow import mine
 from ethereum.tests.hybrid_casper.testing_lang import TestLangHybrid
 from ethereum.utils import encode_hex
-# from devp2p.app import BaseApp
 from pyethapp.app import EthApp
 from pyethapp.eth_service import ChainService
 from pyethapp.db_service import DBService
@@ -30,20 +30,6 @@ class PeerManagerMock(BaseService):
 @pytest.fixture()
 def test_app(request, tmpdir):
     class TestApp(EthApp):
-
-        # def start(self):
-        #     super(TestApp, self).start()
-        #     log.debug('adding test accounts')
-        #     # high balance account
-        #     # self.services.accounts.add_account(Account.new('', tester.keys[0]), store=False)
-        #     # # low balance account
-        #     # self.services.accounts.add_account(Account.new('', tester.keys[1]), store=False)
-        #     # # locked account
-        #     # locked_account = Account.new('', tester.keys[2])
-        #     # locked_account.lock()
-        #     # self.services.accounts.add_account(locked_account, store=False)
-        #     assert set(acct.address for acct in self.services.accounts) == set(tester.accounts[:1])
-
         def mine_next_block(self):
             """Mine until a valid nonce is found.
 
@@ -77,10 +63,6 @@ def test_app(request, tmpdir):
             return chain.head
 
     config = {
-        # 'accounts': {
-        #     'keystore_dir': tempfile.mkdtemp(),
-        # },
-        # 'data_dir': str(tempfile.gettempdir()),
         'data_dir': str(tmpdir),
         'db': {'implementation': 'EphemDB'},
         'pow': {'activated': False},
@@ -105,8 +87,6 @@ def test_app(request, tmpdir):
         },
         'jsonrpc': {'listen_port': 29873},
         'validate': [encode_hex(tester.accounts[0])],
-        # 'validate': [tester.accounts[0]],
-        # 'validate': [],
     }
 
     services = [
@@ -131,22 +111,28 @@ def test_app(request, tmpdir):
     def fin():
         log.debug('stopping test app')
         app.stop()
-        # # cleanup temporary keystore directory
-        # assert app.config['accounts']['keystore_dir'].startswith(tempfile.gettempdir())
-        # shutil.rmtree(app.config['accounts']['keystore_dir'])
-        # log.debug('cleaned temporary keystore dir', dir=app.config['accounts']['keystore_dir'])
     request.addfinalizer(fin)
 
+    # app.start()
     return app
 
 def test_generate_valcode(test_app):
-    # test = TestLangHybrid(5, 25, 0.02, 0.002)
-    # test.parse('B B')
-    # app.services.validator.chain = test.t.chain
-    # app.services.validator.chain.on_new_head_cbs.append(app.services.validator.on_new_head)
-    # test.parse('B1')
+    test = TestLangHybrid(5, 25, 0.02, 0.002)
+    test.parse('B B')
+
+    # Create a smart chain object
+    test.t.chain = hybrid_casper_chain.Chain(genesis=test.genesis, new_head_cb=test_app.services.validator.on_new_head)
+
+    # print(test.t.chain)
+    # test.t.chain.on_new_head_cbs.append(app.services.validator.on_new_head)
+    test_app.services.chain.chain = test.t.chain
+    # print("on_new_head is: {}".format(test_app.services.chain.on_new_head_cbs))
+    # test_app.services.chain.on_new_head_cbs(app.services.validator)
+    # test_app.services.validator.chain = test.t.chain
+    # test_app.services.validator.chain.on_new_head_cbs.append(app.services.validator.on_new_head)
+    test.parse('B1')
     # test_chain = tester.Chain()
     # test_chain.mine(30)
-    test_app.mine_next_block()
+    # test_app.mine_next_block()
 
     assert True
