@@ -71,7 +71,7 @@ class ValidatorService(BaseService):
     def generate_deposit_tx(self):
         nonce = self.chain.state.get_nonce(self.coinbase.address)
         # Generate transaction
-        deposit_tx = self.mk_deposit_tx(self.deposit_size, valcode_addr, nonce+1)
+        deposit_tx = self.mk_deposit_tx(self.deposit_size, self.valcode_addr, nonce)
         # Verify the transaction passes
         temp_state = self.chain.state.ephemeral_clone()
         deposit_success, o2 = apply_transaction(temp_state, deposit_tx)
@@ -133,22 +133,41 @@ class ValidatorService(BaseService):
             return
 
         # We are clear to vote!
-        log.info('[hybrid_casper] Active validator index: {}'.format(self.get_validator_index(self.chain.state)))
-
         casper = tester.ABIContract(tester.State(self.chain.state.ephemeral_clone()), casper_utils.casper_abi,
                                     self.chain.casper_address)
+        validator_index = self.get_validator_index(self.chain.state)
+        # validator_info = casper.get_validators(validator_index)
+        log.info('[hybrid_casper] Active validator index: {}'.format(validator_index))
+
+        # This fails if there are zero deposits (div. by zero), e.g. if we are the first
+        # validator to deposit
         try:
-            log.info('[hybrid_casper] Vote percent: {} - Deposits: {} - Recommended Source: {} - Current Epoch: {}'
-                     .format(casper.get_main_hash_voted_frac(), casper.get_total_curdyn_deposits(),
-                             casper.get_recommended_source_epoch(), casper.get_current_epoch()))
+            voted_frac = casper.get_main_hash_voted_frac()
+        except tester.TransactionFailed:
+            voted_frac = "NaN"
+
+        try:
+            log.info('[hybrid_casper] Vote percent: {:.4%} - Deposits: {} - Recommended Source: {}'.format(
+                float(voted_frac),
+                casper.get_total_curdyn_deposits(),
+                casper.get_recommended_source_epoch(),
+            ))
+            log.info('[hybrid_casper] Current epoch: {} - Current dynasty: {} - Start dynasty: {} - End dynasty: {}'.format(
+                casper.get_current_epoch(),
+                casper.get_dynasty(),
+                "?",
+                "?",
+                # validator_info.start_dynasty,
+                # validator_info.end_dynasty,
+            ))
             is_justified = casper.get_votes__is_justified(casper.get_current_epoch())
             is_finalized = casper.get_votes__is_finalized(casper.get_current_epoch()-1)
             if is_justified:
                 log.info('[hybrid_casper] Justified epoch: {}'.format(casper.get_current_epoch()))
             if is_finalized:
                 log.info('[hybrid_casper] Finalized epoch: {}'.format(casper.get_current_epoch()-1))
-        except e:
-            log.info('[hybrid_casper] Vote frac failed: {}'.format(e))
+        except tester.TransactionFailed as e:
+            log.info('[hybrid_casper] Casper contract call failed: {}'.format(e))
 
         # Generate vote messages and broadcast if possible
         vote_msg = self.generate_vote_message()
