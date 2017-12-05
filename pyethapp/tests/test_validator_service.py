@@ -1,4 +1,5 @@
 from itertools import count
+import functools
 import pytest
 import shutil
 import tempfile
@@ -11,14 +12,44 @@ from ethereum.tools import tester
 from ethereum.tests.hybrid_casper.testing_lang import TestLangHybrid
 from ethereum.utils import encode_hex
 from pyethapp.app import EthApp
-from pyethapp.eth_service import ChainService
 from pyethapp.db_service import DBService
 from pyethapp.accounts import Account, AccountsService
 from pyethapp.validator_service import ValidatorService
 from pyethapp.pow_service import PoWService
 
 log = get_logger('tests.validator_service')
-configure_logging('validator:debug')
+configure_logging('validator:debug,eth.chainservice:debug')
+
+class ChainServiceMock(BaseService):
+    name = 'chain'
+
+    def __init__(self, app, test):
+        super(ChainServiceMock, self).__init__(app)
+
+        class InnerNewHeadCbsMock(object):
+            def __init__(self, outer):
+                self.outer = outer
+
+            def append(self, cb):
+                self.outer.chain.new_head_cb = cb
+
+        # Save as interface to tester
+        self.test = test
+        self.on_new_head_cbs = InnerNewHeadCbsMock(self)
+        # self.chain = hybrid_casper_chain.Chain(genesis=test.genesis, new_head_cb=self.app.services.validator.on_new_head)
+        self.chain = hybrid_casper_chain.Chain(genesis=test.genesis)
+        self.is_syncing = False
+
+    def add_transaction(self, tx):
+        # Relay transactions into the tester for mining
+        return self.test.t.direct_tx(tx)
+
+    # Override this classmethod and add another arg
+    @classmethod
+    def register_with_app(klass, app, test):
+        s = klass(app, test)
+        app.register_service(s)
+        return s
 
 class PeerManagerMock(BaseService):
     name = 'peermanager'
@@ -27,7 +58,11 @@ class PeerManagerMock(BaseService):
         pass
 
 @pytest.fixture()
-def test_app(request, tmpdir):
+def test():
+    return TestLangHybrid(5, 25, 0.02, 0.002)
+
+@pytest.fixture()
+def test_app(request, tmpdir, test):
     config = {
         'data_dir': str(tmpdir),
         'db': {'implementation': 'EphemDB'},
@@ -47,15 +82,11 @@ def test_app(request, tmpdir):
             }
         },
         # 'genesis_data': {},
-        # 'jsonrpc': {'listen_port': 29873},
         'validate': [encode_hex(tester.accounts[0])],
     }
 
     services = [
         DBService,
-        # AccountsService,
-        ChainService,
-        # PoWService,
         PeerManagerMock,
         ValidatorService,
         ]
@@ -67,19 +98,28 @@ def test_app(request, tmpdir):
     AccountsService.register_with_app(app)
     app.services.accounts.add_account(Account.new('', tester.keys[0]), store=False)
 
+    # Need to do this one manually too
+    ChainServiceMock.register_with_app(app, test)
+
     for service in services:
         service.register_with_app(app)
 
     return app
 
-def test_generate_valcode(test_app):
-    test = TestLangHybrid(5, 25, 0.02, 0.002)
-    test.parse('B B')
+def test_generate_valcode(test, test_app):
+    
+    # Link the mock ChainService to the tester object. This is the interface between
+    # pyethapp and pyethereum's test interface.
+    # test_app.services.chainservice.set_tester(test.t)
+
+    # test.parse('B B')
 
     # Create a smart chain object: this ties the chain used in the tester
     # to the validator chain.
-    test.t.chain = hybrid_casper_chain.Chain(genesis=test.genesis, new_head_cb=test_app.services.validator.on_new_head)
-    test_app.services.chain.chain = test.t.chain
-    test.parse('B1')
+    # test.t.chain = hybrid_casper_chain.Chain(genesis=test.genesis, new_head_cb=test_app.services.validator.on_new_head)
+    # test_app.services.chain.chain = test.t.chain
+    # test_app.chain = test.t.chain
+    test_app.chain = test.t.chain = test_app.services.chain.chain
+    test.parse('B')
 
     assert True

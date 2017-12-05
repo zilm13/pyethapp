@@ -41,13 +41,13 @@ class ValidatorService(BaseService):
         else:
             self.validating = False
 
-        app.services.chain.on_new_head_cbs.append(self.on_new_head)
+        self.chainservice.on_new_head_cbs.append(self.on_new_head)
 
     def on_new_head(self, block):
         if not self.validating:
             log.info('[hybrid_casper] not validating, not updating')
             return
-        if self.app.services.chain.is_syncing:
+        if self.chainservice.is_syncing:
             log.info('[hybrid_casper] chain syncing, not updating')
             return
         self.update()
@@ -95,7 +95,7 @@ class ValidatorService(BaseService):
         if not logout_success:
             raise Exception('Logout tx failed')
         log.info('[hybrid_casper] Broadcasting logout tx: {}'.format(str(logout_tx)))
-        self.chainservice.broadcast_transaction(logout_tx)
+        self.chainservice.add_transaction(logout_tx)
 
     def update(self):
         log.info('[hybrid_casper] validator {} updating'.format(self))
@@ -112,7 +112,7 @@ class ValidatorService(BaseService):
         elif not self.valcode_tx:
             self.generate_valcode_tx()
             log.info('[hybrid_casper] Broadcasting valcode tx and waiting for it to be mined')
-            self.chainservice.broadcast_transaction(self.valcode_tx)
+            self.chainservice.add_transaction(self.valcode_tx)
 
             # Wait for it to be mined
             return
@@ -126,7 +126,7 @@ class ValidatorService(BaseService):
         elif not self.did_broadcast_deposit:
             self.generate_deposit_tx()
             log.info('[hybrid_casper] Broadcasting deposit tx')
-            self.chainservice.broadcast_transaction(self.deposit_tx)
+            self.chainservice.add_transaction(self.deposit_tx)
             self.did_broadcast_deposit = True
 
             # Wait for it to be mined
@@ -155,7 +155,7 @@ class ValidatorService(BaseService):
         if vote_msg:
             vote_tx = self.mk_vote_tx(vote_msg)
             log.info('[hybrid_casper] Broadcasting vote: {}'.format(str(vote_tx)))
-            self.chainservice.broadcast_transaction(vote_tx)
+            self.chainservice.add_transaction(vote_tx)
         else:
             log.info('[hybrid_casper] Not voting this round')
 
