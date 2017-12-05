@@ -1,5 +1,4 @@
 from itertools import count
-import functools
 import pytest
 import shutil
 import tempfile
@@ -18,7 +17,7 @@ from pyethapp.validator_service import ValidatorService
 from pyethapp.pow_service import PoWService
 
 log = get_logger('tests.validator_service')
-configure_logging('validator:debug,eth.chainservice:debug')
+configure_logging('validator:debug,eth.chainservice:debug,eth.pb.tx:debug')
 
 class ChainServiceMock(BaseService):
     name = 'chain'
@@ -107,19 +106,12 @@ def test_app(request, tmpdir, test):
     return app
 
 def test_generate_valcode(test, test_app):
-    
     # Link the mock ChainService to the tester object. This is the interface between
     # pyethapp and pyethereum's test interface.
-    # test_app.services.chainservice.set_tester(test.t)
-
-    # test.parse('B B')
 
     # Create a smart chain object: this ties the chain used in the tester
     # to the validator chain.
-    # test.t.chain = hybrid_casper_chain.Chain(genesis=test.genesis, new_head_cb=test_app.services.validator.on_new_head)
-    # test_app.services.chain.chain = test.t.chain
-    # test_app.chain = test.t.chain
     test_app.chain = test.t.chain = test_app.services.chain.chain
-    test.parse('B')
+    test.parse('B B B')
 
     assert True
