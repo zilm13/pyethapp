@@ -5,7 +5,6 @@ import tempfile
 from devp2p.service import BaseService
 from ethereum.config import default_config
 from pyethapp.config import update_config_with_defaults, get_default_config
-from ethereum.pow.ethpow import mine
 from ethereum.slogging import get_logger, configure_logging
 from ethereum.hybrid_casper import chain as hybrid_casper_chain
 from ethereum.tools import tester
@@ -13,13 +12,43 @@ from ethereum.tests.hybrid_casper.testing_lang import TestLangHybrid
 from ethereum.utils import encode_hex
 from pyethapp.app import EthApp
 from pyethapp.db_service import DBService
-from pyethapp.eth_service import ChainService
 from pyethapp.accounts import Account, AccountsService
 from pyethapp.validator_service import ValidatorService
 from pyethapp.pow_service import PoWService
 
 log = get_logger('tests.validator_service')
-configure_logging('validator:debug,eth.chainservice:debug')
+configure_logging('validator:debug,eth.chainservice:debug,eth.pb.tx:debug')
+
+class ChainServiceMock(BaseService):
+    name = 'chain'
+
+    def __init__(self, app, test):
+        super(ChainServiceMock, self).__init__(app)
+
+        class InnerNewHeadCbsMock(object):
+            def __init__(self, outer):
+                self.outer = outer
+
+            def append(self, cb):
+                self.outer.chain.new_head_cb = cb
+
+        # Save as interface to tester
+        self.test = test
+        self.on_new_head_cbs = InnerNewHeadCbsMock(self)
+        # self.chain = hybrid_casper_chain.Chain(genesis=test.genesis, new_head_cb=self.app.services.validator.on_new_head)
+        self.chain = hybrid_casper_chain.Chain(genesis=test.genesis)
+        self.is_syncing = False
+
+    def add_transaction(self, tx):
+        # Relay transactions into the tester for mining
+        return self.test.t.direct_tx(tx)
+
+    # Override this classmethod and add another arg
+    @classmethod
+    def register_with_app(klass, app, test):
+        s = klass(app, test)
+        app.register_service(s)
+        return s
 
 class PeerManagerMock(BaseService):
     name = 'peermanager'
@@ -28,47 +57,11 @@ class PeerManagerMock(BaseService):
         pass
 
 @pytest.fixture()
-def test_app(request, tmpdir):
-    class TestApp(EthApp):
-        def mine_blocks(self, n):
-            for i in range(0, n):
-                self.mine_one_block()
+def test():
+    return TestLangHybrid(5, 25, 0.02, 0.002)
 
-        def mine_epoch(self):
-            epoch_length = self.config['eth']['block']['EPOCH_LENGTH']
-            return self.mine_blocks(epoch_length)
-
-        def mine_one_block(self):
-            """Mine until a valid nonce is found.
-            :returns: the new head
-            """
-            log.debug('mining next block')
-            block = self.services.chain.head_candidate
-            chain = self.services.chain.chain
-            head_number = chain.head.number
-            delta_nonce = 10**6
-            for start_nonce in count(0, delta_nonce):
-                bin_nonce, mixhash = mine(block.number, block.difficulty, block.mining_hash,
-                                            start_nonce=start_nonce, rounds=delta_nonce)
-                if bin_nonce:
-                    break
-            self.services.chain.add_mined_block(block)
-            self.services.pow.recv_found_nonce(bin_nonce, mixhash, block.mining_hash)
-            if len(chain.time_queue) > 0:
-                # If we mine two blocks within one second, pyethereum will
-                # force the new block's timestamp to be in the future (see
-                # ethereum1_setup_block()), and when we try to add that block
-                # to the chain (via Chain.add_block()), it will be put in a
-                # queue for later processing. Since we need to ensure the
-                # block has been added before we continue the test, we
-                # have to manually process the time queue.
-                log.debug('block mined too fast, processing time queue')
-                chain.process_time_queue(new_time=block.timestamp)
-            log.debug('block mined')
-            assert chain.head.difficulty == 1
-            assert chain.head.number == head_number + 1
-            return chain.head
-
+@pytest.fixture()
+def test_app(request, tmpdir, test):
     config = {
         'data_dir': str(tmpdir),
         'db': {'implementation': 'EphemDB'},
@@ -87,41 +80,38 @@ def test_app(request, tmpdir):
                 'BASE_PENALTY_FACTOR': 0.002,
             }
         },
+        # 'genesis_data': {},
         'validate': [encode_hex(tester.accounts[0])],
     }
 
     services = [
         DBService,
-        ChainService,
-        PoWService,
         PeerManagerMock,
         ValidatorService,
         ]
-    update_config_with_defaults(config, get_default_config([TestApp] + services))
+    update_config_with_defaults(config, get_default_config([EthApp] + services))
     update_config_with_defaults(config, {'eth': {'block': default_config}})
-    app = TestApp(config)
+    app = EthApp(config)
 
     # Add AccountsService first and initialize with coinbase account
     AccountsService.register_with_app(app)
     app.services.accounts.add_account(Account.new('', tester.keys[0]), store=False)
+
+    # Need to do this one manually too
+    ChainServiceMock.register_with_app(app, test)
 
     for service in services:
         service.register_with_app(app)
 
     return app
 
-def test_generate_valcode(test_app):
-    epoch_length = test_app.config['eth']['block']['EPOCH_LENGTH']
+def test_generate_valcode(test, test_app):
+    # Link the mock ChainService to the tester object. This is the interface between
+    # pyethapp and pyethereum's test interface.
 
-    # This block should cause the validator to send the valcode tx
-    # This block should cause the validator to send the deposit tx
-    # In this block the validator should be active woop woop
-    test_app.mine_blocks(3)
-
-    # Move to the next epoch
-    test_app.mine_epoch()
-    test_app.mine_epoch()
-    test_app.mine_epoch()
-    # test_app.mine_blocks(1)
+    # Create a smart chain object: this ties the chain used in the tester
+    # to the validator chain.
+    test_app.chain = test.t.chain = test_app.services.chain.chain
+    test.parse('B B B')
 
     assert True
