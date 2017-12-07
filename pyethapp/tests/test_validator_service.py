@@ -19,6 +19,8 @@ from pyethapp.pow_service import PoWService
 log = get_logger('tests.validator_service')
 configure_logging('validator:debug,eth.chainservice:debug,eth.pb.tx:debug')
 
+transaction_queue = []  # Probably best to replace with a real TransactionQueue()
+
 class ChainServiceMock(BaseService):
     name = 'chain'
 
@@ -37,11 +39,18 @@ class ChainServiceMock(BaseService):
         self.on_new_head_cbs = InnerNewHeadCbsMock(self)
         # self.chain = hybrid_casper_chain.Chain(genesis=test.genesis, new_head_cb=self.app.services.validator.on_new_head)
         self.chain = hybrid_casper_chain.Chain(genesis=test.genesis)
+        self.txs = set()
         self.is_syncing = False
 
     def add_transaction(self, tx):
         # Relay transactions into the tester for mining
-        return self.test.t.direct_tx(tx)
+        if tx in self.txs:
+            print('Found duplicate tx!')
+            return
+        self.txs.add(tx)
+        transaction_queue.append(tx)
+        print('Adding tx: {}'.format(tx))
+        return
 
     # Override this classmethod and add another arg
     @classmethod
@@ -113,5 +122,15 @@ def test_generate_valcode(test, test_app):
     # to the validator chain.
     test_app.chain = test.t.chain = test_app.services.chain.chain
     test.parse('B B B')
-
+    print('Mining block')
+    if len(transaction_queue) < 1:
+        print('No tx in queue!')
+        assert False
+    test.t.direct_tx(transaction_queue.pop())
+    test.parse('B1')
+    assert test.t.chain.state.get_code(test_app.services.validator.valcode_addr)
+    print('Valcode deployed!')
+    assert len(transaction_queue) == 1
+    test.t.direct_tx(transaction_queue.pop())
+    print('Deposit tx submitted!')
     assert True
