@@ -174,12 +174,7 @@ class ChainService(WiredService):
         # self.chain = Chain(
         #     env=env, genesis=genesis_data, coinbase=coinbase,
         #     new_head_cb=self._on_new_head)
-        ALLOC = {}
-        # TODO: Remove this dumb default alloc
-        ALLOC[decode_hex('7d577a597b2742b498cb5cf0c26cdcd726d39e6e')] = {'balance': 50000*10**19}
-        ALLOC[decode_hex('b96611e02f9eff3c8afc6226d4ebfa81a821547c')] = {'balance': 50000*10**19}
-        ALLOC[decode_hex('b42e5cafe87d951c5cf0022bfdab06fe56ba2ad2')] = {'balance': 5 * 10**9 * 10**19}
-        genesis_data = casper_utils.make_casper_genesis(ALLOC, 10, 100, 0.02, 0.002)
+        genesis_data = casper_utils.make_casper_genesis({}, 10, 100, 0.02, 0.002, genesis_declaration=sce.get('genesis_data', {}))
         self.chain = Chain(genesis=genesis_data, reset_genesis=True, coinbase=coinbase, new_head_cb=self._on_new_head)
         header = self.chain.state.prev_headers[0]
         log.info('chain at', number=header.number)
