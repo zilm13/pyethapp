@@ -166,14 +166,8 @@ class ChainService(WiredService):
         super(ChainService, self).__init__(app)
         log.info('initializing chain')
         coinbase = app.services.accounts.coinbase
+        # TODO: Generate an env based on the `sce['block']` and use that to create the state
         # env = Env(self.db, sce['block'])
-
-        # genesis_data = sce.get('genesis_data', {})
-        # if not genesis_data:
-        #     genesis_data = mk_genesis_data(env)
-        # self.chain = Chain(
-        #     env=env, genesis=genesis_data, coinbase=coinbase,
-        #     new_head_cb=self._on_new_head)
         genesis_data = casper_utils.make_casper_genesis({}, 10, 100, 0.02, 0.002, genesis_declaration=sce.get('genesis_data', {}))
         self.chain = Chain(genesis=genesis_data, reset_genesis=True, coinbase=coinbase, new_head_cb=self._on_new_head)
         header = self.chain.state.prev_headers[0]
