@@ -72,7 +72,7 @@ def test_app(request, tmpdir, test):
                 'BLOCK_DIFF_FACTOR': 2,  # greater than difficulty, thus difficulty is constant
                 'GENESIS_GAS_LIMIT': 3141592,
                 'GENESIS_INITIAL_ALLOC': {
-                    encode_hex(tester.accounts[0]): {'balance': 10**24},
+                    encode_hex(tester.accounts[0]): {'balance': 10**28},
                 },
                 # Casper FFG stuff
                 'EPOCH_LENGTH': 10,
@@ -106,23 +106,44 @@ def test_app(request, tmpdir, test):
 
     return app
 
-def test_generate_valcode(test, test_app):
-    # Link the mock ChainService to the tester object. This is the interface between
-    # pyethapp and pyethereum's test interface.
-
-    # Create a smart chain object: this ties the chain used in the tester
-    # to the validator chain.
+def test_valcode_deployment_and_successful_deposit(test, test_app):
+    """ Check that the validator's valcode & deposit txs are generated & valid """
     test_app.chain = test.t.chain = test_app.services.chain.chain
-    test.parse('B B B')
-    print('Mining block')
-    if len(transaction_queue) < 1:
-        print('No tx in queue!')
-        assert False
+    validator = test_app.services.validator
+    test.parse('B1')
+    # Check that the valcode tx was generated
+    assert len(transaction_queue) > 0
     test.t.direct_tx(transaction_queue.pop())
     test.parse('B1')
-    assert test.t.chain.state.get_code(test_app.services.validator.valcode_addr)
-    print('Valcode deployed!')
-    assert len(transaction_queue) == 1
+    # Check that the valcode contract is deployed
+    assert test.t.chain.state.get_code(validator.valcode_addr)
+    print('Valcode deployed')
+    # Check that the deposit tx was generated
+    assert len(transaction_queue) > 0
     test.t.direct_tx(transaction_queue.pop())
-    print('Deposit tx submitted!')
-    assert True
+    test.parse('B1')
+    # Check that the validator has been added to the validator list
+    validator_index = test.casper.get_validator_indexes(validator.coinbase.address)
+    assert validator_index > 0
+    print('Validator logged in with index: {}'.format(validator_index))
+
+def test_vote_after_logged_in(test, test_app):
+    """ Check that the validator submits vote txs correctly """
+    test_app.chain = test.t.chain = test_app.services.chain.chain
+    test.parse('B J0 B B')
+    # validator = test_app.services.validator
+    print('These are the txs', transaction_queue)
+    # Make sure we attempted to deploy valcode & deposit
+    assert len(transaction_queue) == 2
+    test.parse('B1')
+    # Check that the vote tx was generated
+    assert len(transaction_queue) == 3
+    test.t.direct_tx(transaction_queue.pop())
+    test.parse('B1')
+    # Get info required to check if the vote went through
+    current_epoch = test.casper.get_current_epoch()
+    expected_source_epoch = test.casper.get_expected_source_epoch()
+    deposit = test.deposit_size / test.casper.get_deposit_scale_factor(current_epoch)
+    # Check that the vote was counted
+    assert test.casper.get_votes__cur_dyn_votes(current_epoch, expected_source_epoch) == deposit
+    print('Validator submitted proper vote')

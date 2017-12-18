@@ -150,8 +150,8 @@ class ValidatorService(BaseService):
         state = self.chain.state.ephemeral_clone()
         epoch = state.block_number // self.epoch_length
         # TODO: Add logic which waits until a specific blockheight before submitting vote, something like:
-        # if state.block_number % self.epoch_length < 1:
-        #     return None
+        if state.block_number % self.epoch_length <= self.epoch_length / 4:
+            return None
         # NO_DBL_VOTE: Don't vote if we have already
         if epoch in self.votes:
             return None
