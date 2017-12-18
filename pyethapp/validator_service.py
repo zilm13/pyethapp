@@ -27,7 +27,7 @@ class ValidatorService(BaseService):
         self.chain = self.chainservice.chain
         self.valcode_tx = None
         self.deposit_tx = None
-        self.deposit_size = 5000 * 10**18
+        self.deposit_size = self.config['deposit_size']
         self.valcode_addr = None
         self.has_broadcasted_deposit = False
         self.votes = dict()

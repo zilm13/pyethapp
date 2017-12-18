@@ -89,8 +89,10 @@ class EthApp(BaseApp):
               help="Log to file instead of stderr.")
 @click.option('-b', '--bootstrap_node', multiple=False, type=str,
               help='single bootstrap_node as enode://pubkey@host:port')
-@click.option('--validate', multiple=True, type=str,
+@click.option('--validate', multiple=False, type=str,
               help='Validate with an account')
+@click.option('--deposit', default=5000, multiple=False, type=int,
+              help='Deposit size in ETH')
 @click.option('-m', '--mining_pct', multiple=False, type=int, default=0,
               help='pct cpu used for mining')
 @click.option('--unlock', multiple=True, type=str,
@@ -98,7 +100,7 @@ class EthApp(BaseApp):
 @click.option('--password', type=click.File(), help='path to a password file')
 @click.pass_context
 def app(ctx, profile, alt_config, config_values, alt_data_dir, log_config,
-        bootstrap_node, log_json, validate, mining_pct, unlock, password, log_file):
+        bootstrap_node, log_json, validate, deposit, mining_pct, unlock, password, log_file):
     # configure logging
     slogging.configure(log_config, log_json=log_json, log_file=log_file)
 
@@ -168,6 +170,7 @@ def app(ctx, profile, alt_config, config_values, alt_data_dir, log_config,
     app_config.update_config_from_genesis_json(config,
                                                genesis_json_filename_or_dict=config['eth']['genesis'])
     config['validate'] = validate
+    config['deposit_size'] = deposit * 10**18
     if bootstrap_node:
         # [NOTE]: check it
         config['discovery']['bootstrap_nodes'] = [to_string(bootstrap_node)]
