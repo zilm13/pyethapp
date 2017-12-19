@@ -91,7 +91,7 @@ class EthApp(BaseApp):
               help='single bootstrap_node as enode://pubkey@host:port')
 @click.option('--validate', multiple=False, type=str,
               help='Validate with an account')
-@click.option('--deposit', default=5000, multiple=False, type=int,
+@click.option('--deposit', multiple=False, type=int,
               help='Deposit size in ETH')
 @click.option('-m', '--mining_pct', multiple=False, type=int, default=0,
               help='pct cpu used for mining')
@@ -170,7 +170,12 @@ def app(ctx, profile, alt_config, config_values, alt_data_dir, log_config,
     app_config.update_config_from_genesis_json(config,
                                                genesis_json_filename_or_dict=config['eth']['genesis'])
     config['validate'] = validate
-    config['deposit_size'] = deposit * 10**18
+    if deposit and not validate:
+        raise Exception('Validate option required if deposit is included!')
+    if deposit:
+        config['deposit_size'] = deposit * 10**18
+    else:
+        config['deposit_size'] = None
     if bootstrap_node:
         # [NOTE]: check it
         config['discovery']['bootstrap_nodes'] = [to_string(bootstrap_node)]
