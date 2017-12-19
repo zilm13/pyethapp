@@ -243,7 +243,7 @@ class ChainService(WiredService):
             # make_head_candidate modifies it.
             txqueue = copy.deepcopy(self.transaction_queue)
             self._head_candidate, self._head_candidate_state = make_head_candidate(
-                self.chain, txqueue, timestamp=int(time.time()))
+                self.chain, txqueue, timestamp=int(time.time() - 1))
         return self._head_candidate
 
     def add_transaction(self, tx, origin=None, force_broadcast=False, force=False):
