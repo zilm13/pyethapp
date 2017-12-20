@@ -86,6 +86,10 @@ class ValidatorService(BaseService):
         if not self.chain.state.get_code(self.valcode_addr):
             # Valcode still not deployed!
             return
+        # Make sure we have enough ETH to deposit
+        if self.chain.state.get_balance(self.coinbase.address) < self.deposit_size:
+            log.info('Cannot login as validator: Not enough ETH!')
+            return
         # Valcode deployed! Let's deposit
         self.broadcast_deposit_tx()
         self.current_state = ValidatorState.waiting_for_login
@@ -126,18 +130,21 @@ class ValidatorService(BaseService):
 
     def log_casper_info(self, casper):
         ce = casper.get_current_epoch()
-        total_curdyn_deposits = casper.get_total_curdyn_deposits()
-        total_prevdyn_deposits = casper.get_total_prevdyn_deposits()
-        voted_curdyn_deposits = casper.get_votes__cur_dyn_votes(ce, casper.get_expected_source_epoch()) * casper.get_deposit_scale_factor(ce)
-        voted_prevdyn_deposits = casper.get_votes__prev_dyn_votes(ce, casper.get_expected_source_epoch()) * casper.get_deposit_scale_factor(ce)
+        ese = casper.get_expected_source_epoch()
+        cur_deposits = casper.get_total_curdyn_deposits()
+        prev_deposits = casper.get_total_prevdyn_deposits()
+        cur_votes = casper.get_votes__cur_dyn_votes(ce, ese) * casper.get_deposit_scale_factor(ce)
+        prev_votes = casper.get_votes__prev_dyn_votes(ce, ese) * casper.get_deposit_scale_factor(ce)
+        cur_vote_pct = cur_votes * 100 / cur_deposits if cur_deposits else 0
+        prev_vote_pct = prev_votes * 100 / prev_deposits if prev_deposits else 0
         last_finalized_epoch, last_justified_epoch = casper.get_last_finalized_epoch(), casper.get_last_justified_epoch()
         last_nonvoter_rescale, last_voter_rescale = casper.get_last_nonvoter_rescale(), casper.get_last_voter_rescale()
-        log.info('CASPER STATUS: epoch %d, %r / %.3f ETH voted from current dynasty, '
-                 '%r / %.3f ETH voted from previous dynasty, last finalized epoch %d justified %d'
+        log.info('CASPER STATUS: epoch %d, %.3f / %.3f ETH (%.2f %%) voted from current dynasty, '
+                 '%.3f / %.3f ETH (%.2f %%) voted from previous dynasty, last finalized epoch %d justified %d '
                  'expected source %d. Nonvoter deposits last rescaled %.5fx, voter deposits %.5fx' %
-                 (ce, voted_curdyn_deposits / 10**18, total_curdyn_deposits / 10**18,
-                     voted_prevdyn_deposits / 10**18, total_prevdyn_deposits / 10**18,
-                  last_finalized_epoch, last_justified_epoch, casper.get_expected_source_epoch(),
+                 (ce, cur_votes / 10**18, cur_deposits / 10**18, cur_vote_pct,
+                  prev_votes / 10**18, prev_deposits / 10**18, prev_vote_pct,
+                  last_finalized_epoch, last_justified_epoch, ese,
                   last_nonvoter_rescale, last_voter_rescale
                   ))
 
