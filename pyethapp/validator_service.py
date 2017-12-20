@@ -131,16 +131,14 @@ class ValidatorService(BaseService):
         voted_curdyn_deposits = casper.get_votes__cur_dyn_votes(ce, casper.get_expected_source_epoch()) * casper.get_deposit_scale_factor(ce)
         voted_prevdyn_deposits = casper.get_votes__prev_dyn_votes(ce, casper.get_expected_source_epoch()) * casper.get_deposit_scale_factor(ce)
         last_finalized_epoch, last_justified_epoch = casper.get_last_finalized_epoch(), casper.get_last_justified_epoch()
-        try:
-            mhvf = casper.get_main_hash_voted_frac()
-        except:
-            mhvf = -1
+        last_nonvoter_rescale, last_voter_rescale = casper.get_last_nonvoter_rescale(), casper.get_last_voter_rescale()
         log.info('CASPER STATUS: epoch %d, %r / %.3f ETH voted from current dynasty, '
-                 '%r / %.3f ETH voted from previous dynasty, last finalized epoch %d justified %d,'
-                 'expected source epoch %d moose %.3f' %
+                 '%r / %.3f ETH voted from previous dynasty, last finalized epoch %d justified %d'
+                 'expected source %d. Nonvoter deposits last rescaled %.5fx, voter deposits %.5fx' %
                  (ce, voted_curdyn_deposits / 10**18, total_curdyn_deposits / 10**18,
                      voted_prevdyn_deposits / 10**18, total_prevdyn_deposits / 10**18,
-                  last_finalized_epoch, last_justified_epoch, casper.get_expected_source_epoch(), mhvf
+                  last_finalized_epoch, last_justified_epoch, casper.get_expected_source_epoch(),
+                  last_nonvoter_rescale, last_voter_rescale
                   ))
 
     def broadcast_valcode_tx(self):
