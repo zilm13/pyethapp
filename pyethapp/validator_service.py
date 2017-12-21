@@ -15,7 +15,9 @@ class ValidatorState(Enum):
     waiting_for_login = 3       # Wait for validator to login, then change state to `voting`
     voting = 4                  # Vote on each new epoch
     waiting_for_log_out = 5
-    logged_out = 6
+    waiting_for_withdrawable = 6
+    waiting_for_withdrawn = 7
+    logged_out = 8
 
 
 # TODO: Check if user is logged in & reinitialize based on contract
@@ -38,6 +40,7 @@ class ValidatorService(BaseService):
         self.chainservice = app.services.chain
         self.chain = self.chainservice.chain
         self.deposit_size = self.config['deposit_size']
+        self.should_logout = self.config['should_logout']
         self.valcode_addr = None
         self.epoch_length = self.chain.env.config['EPOCH_LENGTH']
         self.votes = dict()
@@ -53,7 +56,11 @@ class ValidatorService(BaseService):
             ValidatorState.uninitiated: self.check_logged_in,
             ValidatorState.waiting_for_valcode: self.check_valcode,
             ValidatorState.waiting_for_login: self.check_logged_in,
-            ValidatorState.voting: self.vote
+            ValidatorState.voting: self.vote,
+            ValidatorState.waiting_for_log_out: self.vote_then_logout,
+            ValidatorState.waiting_for_withdrawable: self.check_withdrawable,
+            ValidatorState.waiting_for_withdrawn: self.check_withdrawn,
+            ValidatorState.logged_out: self.check_logged_in
         }
 
     def on_new_head(self, block):
@@ -78,9 +85,13 @@ class ValidatorService(BaseService):
         if not self.is_logged_in(casper, casper.get_current_epoch(), validator_index):
             # The validator isn't logged in, so return!
             return
-        # The validator is logged in, so set the state to voting!
-        log.info('Changing validator state to voting')
-        self.current_state = ValidatorState.voting
+        # The validator is logged in, check if we should start start voting or a logout sequence
+        if self.should_logout:
+            log.info('Changing validator state to log out')
+            self.current_state = ValidatorState.waiting_for_log_out
+        else:
+            log.info('Changing validator state to voting')
+            self.current_state = ValidatorState.voting
 
     def check_valcode(self, casper):
         if not self.chain.state.get_code(self.valcode_addr):
@@ -94,26 +105,41 @@ class ValidatorService(BaseService):
         self.broadcast_deposit_tx()
         self.current_state = ValidatorState.waiting_for_login
 
+    def vote_then_logout(self, casper):
+        epoch = self.chain.state.block_number // self.epoch_length
+        validator_index = self.get_validator_index(casper)
+        # Verify that we are not already logged out
+        if not self.is_logged_in(casper, epoch, validator_index):
+            # If we logged out, start waiting for withdrawls
+            log.info('Validator logged out!')
+            self.current_state = ValidatorState.waiting_for_withdrawable
+            return None
+        logout_tx_nonce = self.chain.state.get_nonce(self.coinbase.address)
+        vote_successful = self.vote(casper)
+        if vote_successful:
+            logout_tx_nonce += 1
+        self.broadcast_logout_tx(casper, logout_tx_nonce)
+        self.current_state = ValidatorState.waiting_for_log_out
+
     def vote(self, casper):
         log.info('Attempting to vote')
         epoch = self.chain.state.block_number // self.epoch_length
-        if self.chain.state.block_number % self.epoch_length <= self.epoch_length / 4:
-            return None
         # NO_DBL_VOTE: Don't vote if we have already
         if epoch in self.votes:
-            return None
-        # Get the ancestry hash and source ancestry hash
+            return False
         validator_index = self.get_validator_index(casper)
+        # Make sure we are logged in
+        if not self.is_logged_in(casper, epoch, validator_index):
+            raise Exception('Cannot vote: Validator not logged in!')
+        if self.chain.state.block_number % self.epoch_length <= self.epoch_length / 4:
+            return False
+        # Get the ancestry hash and source ancestry hash
         target_hash, epoch, source_epoch = self.recommended_vote_contents(casper, validator_index)
         if target_hash is None:
-            return None
+            return False
         # Prevent NO_SURROUND slash
         if epoch < self.latest_target_epoch or source_epoch < self.latest_source_epoch:
-            return None
-        # Verify that we are either in the current dynasty or prev dynasty
-        if not self.is_logged_in(casper, epoch, validator_index):
-            log.info('Validator not logged in yet!')
-            return None
+            return False
         vote_msg = casper_utils.mk_vote(validator_index, target_hash, epoch,
                                         source_epoch, self.coinbase.privkey)
         # Save the vote message we generated
@@ -127,6 +153,27 @@ class ValidatorService(BaseService):
         log.info('Vote submitted: validator %d - epoch %d - source_epoch %d - hash %s' %
                  (self.get_validator_index(casper),
                   epoch, source_epoch, utils.encode_hex(target_hash)))
+        return True
+
+    def check_withdrawable(self, casper):
+        vindex = self.get_validator_index(casper)
+        if vindex == 0:
+            log.info('Validator is already deleted!')
+            self.current_state = ValidatorState.logged_out
+            return
+        end_epoch = casper.get_dynasty_start_epoch(casper.get_validators__end_dynasty(vindex) + 1)
+        # Check Casper to see if we can withdraw
+        if casper.get_current_epoch() >= end_epoch + casper.get_withdrawal_delay():
+            # Make withdraw tx & broadcast
+            withdraw_tx = self.mk_withdraw_tx(self.get_validator_index(casper))
+            self.chainservice.broadcast_transaction(withdraw_tx)
+            # Set the state to waiting for withdrawn
+            self.current_state = ValidatorState.waiting_for_withdrawn
+
+    def check_withdrawn(self, casper):
+        # Check that we have been withdrawn--validator index will now be zero
+        if casper.get_validator_indexes(self.coinbase.address) == 0:
+            self.current_state = ValidatorState.logged_out
 
     def log_casper_info(self, casper):
         ce = casper.get_current_epoch()
@@ -166,6 +213,16 @@ class ValidatorService(BaseService):
         log.info('Broadcasting deposit tx with nonce: {}'.format(deposit_tx.nonce))
         self.deposit_size = None
         self.chainservice.broadcast_transaction(deposit_tx)
+
+    def broadcast_logout_tx(self, casper, nonce):
+        epoch = self.chain.state.block_number // self.epoch_length
+        # Generage the message
+        logout_msg = casper_utils.mk_logout(self.get_validator_index(casper),
+                                            epoch, self.coinbase.privkey)
+        # Generate transactions
+        logout_tx = self.mk_logout_tx(logout_msg, nonce)
+        log.info('Logout Tx generated: {}'.format(str(logout_tx)))
+        self.chainservice.broadcast_transaction(logout_tx)
 
     def mk_transaction(self, to=b'\x00' * 20, value=0, data=b'',
                        gasprice=tester.GASPRICE, startgas=tester.STARTGAS, nonce=None):
@@ -214,3 +271,15 @@ class ValidatorService(BaseService):
         vote_tx = self.mk_transaction(to=self.chain.casper_address,
                                       value=0, startgas=1000000, data=vote_func)
         return vote_tx
+
+    def mk_logout_tx(self, logout_msg, nonce):
+        casper_ct = abi.ContractTranslator(casper_utils.casper_abi)
+        logout_func = casper_ct.encode('logout', [logout_msg])
+        logout_tx = self.mk_transaction(self.chain.casper_address, data=logout_func)
+        return logout_tx
+
+    def mk_withdraw_tx(self, validator_index):
+        casper_ct = abi.ContractTranslator(casper_utils.casper_abi)
+        withdraw_func = casper_ct.encode('withdraw', [validator_index])
+        withdraw_tx = self.mk_transaction(self.chain.casper_address, data=withdraw_func)
+        return withdraw_tx

@@ -10,7 +10,7 @@ from ethereum.utils import encode_hex
 from pyethapp.app import EthApp
 from pyethapp.db_service import DBService
 from pyethapp.accounts import Account, AccountsService
-from pyethapp.validator_service import ValidatorService
+from pyethapp.validator_service import ValidatorState, ValidatorService
 
 log = get_logger('tests.validator_service')
 configure_logging('validator:debug,eth.chainservice:debug,eth.pb.tx:debug')
@@ -59,7 +59,7 @@ class PeerManagerMock(BaseService):
 
 @pytest.fixture()
 def test():
-    return TestLangHybrid(5, 25, 0.02, 0.002)
+    return TestLangHybrid(5, 5, 0.02, 0.002)
 
 @pytest.fixture()
 def test_app(request, tmpdir, test):
@@ -84,6 +84,7 @@ def test_app(request, tmpdir, test):
         # 'genesis_data': {},
         'validate': [encode_hex(tester.accounts[0])],
         'deposit_size': 5000,
+        'should_logout': False,
     }
 
     services = [
@@ -148,3 +149,33 @@ def test_vote_after_logged_in(test, test_app):
     # Check that the vote was counted
     assert test.casper.get_votes__cur_dyn_votes(current_epoch, expected_source_epoch) == deposit
     print('Validator submitted proper vote')
+
+def test_validator_logout_and_withdrawal(test, test_app):
+    """ Check that the validator logs out properly """
+    test_app.chain = test.t.chain = test_app.services.chain.chain
+    validator = test_app.services.validator
+    test.parse('B J0 B B')
+    # validator = test_app.services.validator
+    print('These are the txs', transaction_queue)
+    # Make sure we attempted to deploy valcode & deposit
+    assert len(transaction_queue) == 2
+    # Now set current state to waiting for log out
+    validator.current_state = ValidatorState.waiting_for_log_out
+    test.parse('B1')
+    # Check that the logout & vote tx were generated and our current state is waiting for logout
+    assert len(transaction_queue) == 4
+    assert validator.current_state == ValidatorState.waiting_for_log_out
+    # Apply vote and then apply logout
+    test.t.direct_tx(transaction_queue.pop(len(transaction_queue)-2))
+    test.parse('B1')
+    test.t.direct_tx(transaction_queue.pop())
+    test.parse('B1')
+    assert validator.current_state == ValidatorState.waiting_for_log_out
+    test.parse('B V0 B V0 B')
+    assert validator.current_state == ValidatorState.waiting_for_withdrawable
+    test.parse('B B B B B')
+    assert validator.current_state == ValidatorState.waiting_for_withdrawn
+    test.t.direct_tx(transaction_queue.pop())
+    test.parse('B1')
+    assert validator.current_state == ValidatorState.logged_out
+    print('Successfully completed logout and withdrawl!')

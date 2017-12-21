@@ -93,6 +93,8 @@ class EthApp(BaseApp):
               help='Validate with an account')
 @click.option('--deposit', multiple=False, type=int,
               help='Deposit size in ETH')
+@click.option('--logout', multiple=False, type=bool, is_flag=True, default=False,
+              help='Start the validator but attempt to logout')
 @click.option('-m', '--mining_pct', multiple=False, type=int, default=0,
               help='pct cpu used for mining')
 @click.option('--unlock', multiple=True, type=str,
@@ -100,7 +102,7 @@ class EthApp(BaseApp):
 @click.option('--password', type=click.File(), help='path to a password file')
 @click.pass_context
 def app(ctx, profile, alt_config, config_values, alt_data_dir, log_config,
-        bootstrap_node, log_json, validate, deposit, mining_pct, unlock, password, log_file):
+        bootstrap_node, log_json, validate, deposit, logout, mining_pct, unlock, password, log_file):
     # configure logging
     slogging.configure(log_config, log_json=log_json, log_file=log_file)
 
@@ -172,6 +174,7 @@ def app(ctx, profile, alt_config, config_values, alt_data_dir, log_config,
     config['validate'] = validate
     if deposit and not validate:
         raise Exception('Validate option required if deposit is included!')
+    config['should_logout'] = logout
     if deposit:
         config['deposit_size'] = deposit * 10**18
     else:
