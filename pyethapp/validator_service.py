@@ -50,7 +50,7 @@ class ValidatorService(BaseService):
         # Set new block callback. This will trigger validation logic
         app.services.chain.on_new_head_cbs.append(self.on_new_head)
         # Set up the validator's state & handlers
-        self.current_state = ValidatorState.uninitiated
+        self.set_current_state(ValidatorState.uninitiated)
 
         self.handlers = {
             ValidatorState.uninitiated: self.check_logged_in,
@@ -77,7 +77,7 @@ class ValidatorService(BaseService):
         if not validator_index and self.deposit_size:
             # The validator hasn't deposited funds but deposit flag is set, so deposit!
             self.broadcast_valcode_tx()
-            self.current_state = ValidatorState.waiting_for_valcode
+            self.set_current_state(ValidatorState.waiting_for_valcode)
         elif not validator_index:
             # The validator hasn't deposited funds and we have no intention to, so return!
             return
@@ -88,10 +88,10 @@ class ValidatorService(BaseService):
         # The validator is logged in, check if we should start start voting or a logout sequence
         if self.should_logout:
             log.info('Changing validator state to log out')
-            self.current_state = ValidatorState.waiting_for_log_out
+            self.set_current_state(ValidatorState.waiting_for_log_out)
         else:
             log.info('Changing validator state to voting')
-            self.current_state = ValidatorState.voting
+            self.set_current_state(ValidatorState.voting)
 
     def check_valcode(self, casper):
         if not self.chain.state.get_code(self.valcode_addr):
@@ -103,7 +103,7 @@ class ValidatorService(BaseService):
             return
         # Valcode deployed! Let's deposit
         self.broadcast_deposit_tx()
-        self.current_state = ValidatorState.waiting_for_login
+        self.set_current_state(ValidatorState.waiting_for_login)
 
     def vote_then_logout(self, casper):
         epoch = self.chain.state.block_number // self.epoch_length
@@ -112,14 +112,14 @@ class ValidatorService(BaseService):
         if not self.is_logged_in(casper, epoch, validator_index):
             # If we logged out, start waiting for withdrawls
             log.info('Validator logged out!')
-            self.current_state = ValidatorState.waiting_for_withdrawable
+            self.set_current_state(ValidatorState.waiting_for_withdrawable)
             return None
         logout_tx_nonce = self.chain.state.get_nonce(self.coinbase.address)
         vote_successful = self.vote(casper)
         if vote_successful:
             logout_tx_nonce += 1
         self.broadcast_logout_tx(casper, logout_tx_nonce)
-        self.current_state = ValidatorState.waiting_for_log_out
+        self.set_current_state(ValidatorState.waiting_for_log_out)
 
     def vote(self, casper):
         log.info('Attempting to vote')
@@ -159,7 +159,7 @@ class ValidatorService(BaseService):
         vindex = self.get_validator_index(casper)
         if vindex == 0:
             log.info('Validator is already deleted!')
-            self.current_state = ValidatorState.logged_out
+            self.set_current_state(ValidatorState.logged_out)
             return
         end_epoch = casper.get_dynasty_start_epoch(casper.get_validators__end_dynasty(vindex) + 1)
         # Check Casper to see if we can withdraw
@@ -168,12 +168,12 @@ class ValidatorService(BaseService):
             withdraw_tx = self.mk_withdraw_tx(self.get_validator_index(casper))
             self.chainservice.broadcast_transaction(withdraw_tx)
             # Set the state to waiting for withdrawn
-            self.current_state = ValidatorState.waiting_for_withdrawn
+            self.set_current_state(ValidatorState.waiting_for_withdrawn)
 
     def check_withdrawn(self, casper):
         # Check that we have been withdrawn--validator index will now be zero
         if casper.get_validator_indexes(self.coinbase.address) == 0:
-            self.current_state = ValidatorState.logged_out
+            self.set_current_state(ValidatorState.logged_out)
 
     def log_casper_info(self, casper):
         ce = casper.get_current_epoch()
@@ -194,6 +194,10 @@ class ValidatorService(BaseService):
                   last_finalized_epoch, last_justified_epoch, ese,
                   last_nonvoter_rescale, last_voter_rescale
                   ))
+
+    def set_current_state(self, validator_state):
+        log.info('Changing validator state to: {}'.format(validator_state))
+        self.current_state = validator_state
 
     def broadcast_valcode_tx(self):
         valcode_tx = self.mk_transaction('', 0,
