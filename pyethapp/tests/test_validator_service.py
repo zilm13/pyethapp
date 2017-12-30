@@ -167,6 +167,7 @@ def test_validator_logout_and_withdrawal(test, test_app):
     assert validator.current_state == ValidatorState.waiting_for_log_out
     # Apply vote and then apply logout
     test.t.direct_tx(transaction_queue.pop(len(transaction_queue)-2))
+    validator.last_logout_broadcast = 0
     test.parse('B1')
     test.t.direct_tx(transaction_queue.pop())
     test.parse('B1')

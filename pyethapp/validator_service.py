@@ -1,4 +1,5 @@
 from __future__ import print_function
+import time
 from enum import Enum
 from devp2p.service import BaseService
 from ethereum.slogging import get_logger
@@ -51,6 +52,8 @@ class ValidatorService(BaseService):
         app.services.chain.on_new_head_cbs.append(self.on_new_head)
         # Set up the validator's state & handlers
         self.set_current_state(ValidatorState.uninitiated)
+        self.logout_broadcast_cooldown = 60
+        self.last_logout_broadcast = 0
 
         self.handlers = {
             ValidatorState.uninitiated: self.check_logged_in,
@@ -219,13 +222,16 @@ class ValidatorService(BaseService):
         self.chainservice.broadcast_transaction(deposit_tx)
 
     def broadcast_logout_tx(self, casper, nonce):
+        if self.last_logout_broadcast > time.time() - self.logout_broadcast_cooldown:
+            return
+        self.last_logout_broadcast = time.time()
         epoch = self.chain.state.block_number // self.epoch_length
         # Generage the message
         logout_msg = casper_utils.mk_logout(self.get_validator_index(casper),
                                             epoch, self.coinbase.privkey)
         # Generate transactions
         logout_tx = self.mk_logout_tx(logout_msg, nonce)
-        log.info('Logout Tx generated: {}'.format(str(logout_tx)))
+        log.info('Logout Tx broadcasted: {}'.format(str(logout_tx)))
         self.chainservice.broadcast_transaction(logout_tx)
 
     def mk_transaction(self, to=b'\x00' * 20, value=0, data=b'',
