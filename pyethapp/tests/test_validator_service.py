@@ -83,7 +83,7 @@ def test_app(request, tmpdir, test):
         },
         # 'genesis_data': {},
         'validate': [encode_hex(tester.accounts[0])],
-        'deposit_size': 5000,
+        'deposit_size': 5000 * 10**18,
         'should_logout': False,
     }
 

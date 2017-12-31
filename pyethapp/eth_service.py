@@ -188,8 +188,7 @@ class ChainService(WiredService):
         self._head_candidate_needs_updating = True
         # Initialize a new head candidate.
         _ = self.head_candidate
-        self.min_gasprice = 0 # TODO: Change this to actually make sense
-        # self.min_gasprice = 20 * 10**9 # TODO: better be an option to validator service?
+        self.min_gasprice = 100 * 10**9 # TODO: better be an option to validator service?
         self.add_blocks_lock = False
         self.add_transaction_lock = gevent.lock.Semaphore()
         self.broadcast_filter = DuplicatesFilter()
@@ -279,7 +278,10 @@ class ChainService(WiredService):
                 log.debug('discarding tx', syncing=self.is_syncing, mining=self.is_mining)
                 return
 
-        if tx.gasprice >= self.min_gasprice:
+        casper_contract = tx.to == self.chain.state.env.config['CASPER_ADDRESS']
+        vote = tx.data[0:4] == b'\xe9\xdc\x06\x14'
+        null_sender = tx.sender == b'\xff' * 20
+        if tx.gasprice >= self.min_gasprice or (casper_contract and vote and null_sender):
             self.add_transaction_lock.acquire()
             self.transaction_queue.add_transaction(tx, force=force)
             self._head_candidate_needs_updating = True

@@ -235,11 +235,12 @@ class ValidatorService(BaseService):
         self.chainservice.broadcast_transaction(logout_tx)
 
     def mk_transaction(self, to=b'\x00' * 20, value=0, data=b'',
-                       gasprice=tester.GASPRICE, startgas=tester.STARTGAS, nonce=None):
+                       gasprice=110*10**9, startgas=tester.STARTGAS, nonce=None, signed=True):
         if nonce is None:
             nonce = self.chain.state.get_nonce(self.coinbase.address)
         tx = transactions.Transaction(nonce, gasprice, startgas, to, value, data)
-        self.coinbase.sign_tx(tx)
+        if signed:
+            self.coinbase.sign_tx(tx)
         return tx
 
     def is_logged_in(self, casper, target_epoch, validator_index):
@@ -278,8 +279,8 @@ class ValidatorService(BaseService):
     def mk_vote_tx(self, vote_msg):
         casper_ct = abi.ContractTranslator(casper_utils.casper_abi)
         vote_func = casper_ct.encode('vote', [vote_msg])
-        vote_tx = self.mk_transaction(to=self.chain.casper_address,
-                                      value=0, startgas=1000000, data=vote_func)
+        vote_tx = self.mk_transaction(to=self.chain.casper_address, nonce=0, gasprice=0,
+                                      value=0, startgas=1000000, data=vote_func, signed=False)
         return vote_tx
 
     def mk_logout_tx(self, logout_msg, nonce):
