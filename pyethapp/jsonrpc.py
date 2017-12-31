@@ -1170,11 +1170,9 @@ class Chain(Subdispatcher):
     @public
     @decode_arg('block_id', block_id_decoder)
     @encode_res(data_encoder)
-    def call(self, data, block_id='pending'):
-        if block_id != 'pending':
-            raise Exception("Only pending supported right now")
+    def call(self, data, block_id=None):
 
-        prestate = self.app.services.chain.state.ephemeral_clone()
+        prestate = self.app.services.chain.chain.state.ephemeral_clone()
 
         # validate transaction
         if not isinstance(data, dict):
@@ -1183,7 +1181,7 @@ class Chain(Subdispatcher):
         try:
             startgas = quantity_decoder(data['gas'])
         except KeyError:
-            startgas = test_block.gas_limit - test_block.gas_used
+            startgas = prestate.gas_limit - prestate.gas_used
         try:
             gasprice = quantity_decoder(data['gasPrice'])
         except KeyError:
