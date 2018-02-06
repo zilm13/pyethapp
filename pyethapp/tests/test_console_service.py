@@ -1,7 +1,6 @@
 from builtins import str
 from itertools import count
 import pytest
-import serpent
 from devp2p.peermanager import PeerManager
 import ethereum
 from ethereum.tools import tester
@@ -121,12 +120,11 @@ def test_app(request, tmpdir):
 
 
 def test_send_transaction_with_contract(test_app):
-    serpent_code = '''
-def main(a,b):
-    return(a ^ b)
-'''
     tx_to = b''
-    evm_code = serpent.compile(serpent_code)
+    # Serpent code:
+    # def main(a,b):
+    #     return(a ^ b)
+    evm_code = b'a\x00K\x80a\x00\x0e`\x009a\x00YV|\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00`\x005\x04c\x97\xd8W\xaa\x81\x14\x15a\x00IW`\x045`@R`$5``R``Q`@Q\n`\x80R` `\x80\xf3[P[`\x00\xf3'
     chain = test_app.services.chain.chain
     chainservice = test_app.services.chain
     hc_state = State(chainservice.head_candidate.state_root, chain.env)

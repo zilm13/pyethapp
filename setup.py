@@ -30,25 +30,9 @@ with codecs.open('HISTORY.rst', encoding='utf8') as history_file:
 
 LONG_DESCRIPTION = README + '\n\n' + HISTORY
 
-# requirements
-install_requires = set(x.strip() for x in open('requirements.txt'))
-install_requires_replacements = {
-    'https://github.com/ethereum/serpent/tarball/develop': 'ethereum-serpent',
-    'https://github.com/ethereum/pydevp2p/tarball/develop': 'devp2p',
-    'https://github.com/ethereum/pyethereum/tarball/develop': 'ethereum'
-}
-install_requires = [install_requires_replacements.get(r, r) for r in install_requires]
-
-# dependency links
-dependency_links = [
-    'https://github.com/ethereum/serpent/tarball/develop#egg=ethereum-serpent-9.99.9',
-    'http://github.com/ethereum/pydevp2p/tarball/develop#egg=devp2p-9.99.9',
-    'http://github.com/ethereum/pyethereum/tarball/develop#egg=ethereum-9.99.9',
-]
-
 # *IMPORTANT*: Don't manually change the version here. Use the 'bump2version' utility.
 # see: https://github.com/ethereum/pyethapp/wiki/Development:-Versions-and-Releases
-version = '1.5.0'
+version = '1.5.1a0'
 
 setup(
     name='pyethapp',
@@ -77,10 +61,7 @@ setup(
         'Programming Language :: Python :: 3.6',
     ],
     cmdclass={'test': PyTest},
-    install_requires=install_requires,
-    dependency_links=dependency_links,
     tests_require=[
-        # 'ethereum-serpent>=1.8.1',
         'mock==2.0.0',
         'pytest-mock==1.6.0',
     ],
