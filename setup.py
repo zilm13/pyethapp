@@ -30,6 +30,8 @@ with codecs.open('HISTORY.rst', encoding='utf8') as history_file:
 
 LONG_DESCRIPTION = README + '\n\n' + HISTORY
 
+install_requires = set(x.strip() for x in open('requirements.txt'))
+
 # *IMPORTANT*: Don't manually change the version here. Use the 'bump2version' utility.
 # see: https://github.com/ethereum/pyethapp/wiki/Development:-Versions-and-Releases
 version = '1.5.1a0'
@@ -61,6 +63,7 @@ setup(
         'Programming Language :: Python :: 3.6',
     ],
     cmdclass={'test': PyTest},
+    install_requires=install_requires,
     tests_require=[
         'mock==2.0.0',
         'pytest-mock==1.6.0',
