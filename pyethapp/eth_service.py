@@ -572,6 +572,15 @@ class ChainService(WiredService):
         self.synchronizer.receive_newblockhashes(proto, newblockhashes)
 
     def on_receive_getblockheaders(self, proto, hash_or_number, block, amount, skip, reverse):
+        try:
+            print("hash_or_number[0]: %s" % hash_or_number[0])
+            print("amount: %s" % amount)
+            print("skip: %s" % skip)
+            print("reverse: %s" % reverse)
+            print("hash_or_number[1]: %s" % hash_or_number[1])
+            print("block: %s" % block)
+        except:
+            pass
         hash_mode = 1 if hash_or_number[0] else 0
         block_id = encode_hex(hash_or_number[0]) if hash_mode else hash_or_number[1]
         log.debug('----------------------------------')
