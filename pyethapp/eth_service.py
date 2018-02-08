@@ -420,6 +420,18 @@ class ChainService(WiredService):
             log.debug('already broadcasted tx')
 
     def query_headers(self, hash_mode, max_hashes, skip, reverse, origin_hash=None, number=None):
+        # hash_mode = 1
+        # max_hashes = 1
+        # skip = 0
+        # reverse = 0
+        # origin_hash = block'b
+        # block_id = hash's
+        log.debug("hash_mode: %s" % hash_mode)
+        log.debug("max_hashes: %s" % max_hashes)
+        log.debug("skip: %s" % skip)
+        log.debug("reverse: %s" % reverse)
+        log.debug("origin_hash: %s" % origin_hash)
+        log.debug("block_id: %s" % number)
         headers = []
         unknown = False
         while not unknown and len(headers) < max_hashes:
@@ -443,9 +455,12 @@ class ChainService(WiredService):
                 origin = block.header
 
             headers.append(origin)
+            log.debug("headers size: %s" % len(headers))
 
             if hash_mode:  # hash traversal
+                log.debug("hash mode")
                 if reverse:
+                    log.debug("reverse")
                     for i in range(skip+1):
                         try:
                             block = self.chain.get_block(origin_hash)
@@ -458,14 +473,20 @@ class ChainService(WiredService):
                             unknown = True
                             break
                 else:
+                    log.debug("not reverse")
                     blockhash = self.chain.get_blockhash_by_number(origin.number + skip + 1)
+                    log.debug("blockhash: %s" % blockhash)
                     try:
+                        log.debug("skip: %s" % skip)
                         # block = self.chain.get_block(blockhash)
                         if block and self.chain.get_blockhashes_from_hash(blockhash, skip+1)[skip] == origin_hash:
+                            log.debug("if:483")
                             origin_hash = blockhash
                         else:
+                            log.debug("else:486")
                             unknown = True
                     except KeyError:
+                        log.debug("except:489")
                         unknown = True
             else:  # number traversal
                 if reverse:
@@ -475,6 +496,7 @@ class ChainService(WiredService):
                         unknown = True
                 else:
                     number += (skip + 1)
+        log.debug("return headers size: %s" % len(headers))
         return headers
 
     # wire protocol receivers ###########
