@@ -573,12 +573,12 @@ class ChainService(WiredService):
 
     def on_receive_getblockheaders(self, proto, hash_or_number, block, amount, skip, reverse):
         try:
-            print("hash_or_number[0]: %s" % hash_or_number[0])
-            print("amount: %s" % amount)
-            print("skip: %s" % skip)
-            print("reverse: %s" % reverse)
-            print("hash_or_number[1]: %s" % hash_or_number[1])
-            print("block: %s" % block)
+            log.debug("hash_or_number[0]: %s" % hash_or_number[0])
+            log.debug("amount: %s" % amount)
+            log.debug("skip: %s" % skip)
+            log.debug("reverse: %s" % reverse)
+            log.debug("hash_or_number[1]: %s" % hash_or_number[1])
+            log.debug("block: %s" % block)
         except:
             pass
         hash_mode = 1 if hash_or_number[0] else 0
