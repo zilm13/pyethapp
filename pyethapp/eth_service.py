@@ -456,6 +456,8 @@ class ChainService(WiredService):
 
             headers.append(origin)
             log.debug("headers size: %s" % len(headers))
+            if (len(headers) == max_hashes):    # quick fix
+                break
 
             if hash_mode:  # hash traversal
                 log.debug("hash mode")
