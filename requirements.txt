@@ -16,7 +16,7 @@ pbkdf2
 scrypt
 pexpect
 pyelliptic==1.5.7
-tinyrpc[gevent,httpclient,jsonext,websocket,wsgi]
+tinyrpc==0.6
 pycryptodome==3.4.6
 future
 https://github.com/ethereum/serpent/tarball/develop
