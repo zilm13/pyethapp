@@ -626,9 +626,8 @@ class ChainService(WiredService):
             except KeyError:
                 origin_hash = b''
         if not origin_hash or not self.chain.has_blockhash(origin_hash):
-            log.info("before 629")
-            log.debug('unknown block: {}'.format(encode_hex(origin_hash)))
-            log.info("after 631")
+            if origin_hash is not None:
+                log.debug('unknown block: {}'.format(encode_hex(origin_hash)))
             proto.send_blockheaders(*[])
             return
 
